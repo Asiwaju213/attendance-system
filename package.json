@@ -1,0 +1,17 @@
+{
+  "name": "oou-attendance-system",
+  "version": "1.0.0",
+  "private": true,
+  "description": "End-to-end testing for the OOU Attendance System",
+  "scripts": {
+    "test:e2e": "playwright test",
+    "test:e2e:headed": "playwright test --headed",
+    "test:e2e:ui": "playwright test --ui",
+    "test:e2e:report": "playwright show-report"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.63.0",
+    "@types/node": "^22.20.2",
+    "typescript": "^7.0.2"
+  }
+}
