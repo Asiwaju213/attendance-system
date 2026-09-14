@@ -29,6 +29,8 @@ It also creates a small `set_updated_at()` trigger, useful indexes on foreign ke
 Later migrations build on this foundation:
 - `003_add_authentication.sql` adds `users.username` (admin logins) and the `sessions` table.
 - `004_faculties_and_course_ownership.sql` adds the `faculties` table and supports faculty-wide + department-specific courses (see below).
+- `005_student_import_previews.sql` adds the staging tables used to preview/confirm student bulk imports.
+- `006_student_registration_challenges.sql` adds the single-use challenge table for the student self-registration flow.
 
 ## Migration 004: faculties and course ownership
 
@@ -43,6 +45,18 @@ Later migrations build on this foundation:
   - `level_id` stays `NOT NULL`; `course_code` stays globally `UNIQUE` across both scopes
 - All new foreign keys use restrictive deletes (`ON DELETE RESTRICT`), matching the existing academic tables, so historical course/offering/registration/attendance records are preserved.
 - New indexes: `idx_departments_faculty_id`, `idx_courses_faculty_id`, `idx_courses_department_level`, `idx_courses_faculty_level`.
+
+## Migration 007: student device WebAuthn credentials
+
+`migrations/007_student_device_webauthn.sql` makes `student_devices` store real WebAuthn public-key credentials:
+
+- Drops the placeholder `device_credential` column and adds:
+  - `credential_id TEXT NOT NULL UNIQUE` — the base64url WebAuthn credential ID; globally unique so one credential can never be enrolled twice (active or revoked).
+  - `credential_public_key BYTEA NOT NULL` — the raw COSE public-key bytes. Only public key material is ever stored; there is no private-key column.
+  - `counter BIGINT NOT NULL DEFAULT 0` — the last authenticator signature counter.
+  - `transports TEXT[]`, `cred_type TEXT NOT NULL DEFAULT 'public-key'` (CHECK), `aaguid TEXT`, `label TEXT` (display-only), `updated_at` (+ `set_updated_at()` trigger).
+- Keeps the partial unique index `one_active_device_per_student ON (student_id) WHERE status = 'ACTIVE'`, so a student can hold many revoked devices but at most one `ACTIVE` one. The `UNIQUE(credential_id)` index is the second backstop.
+- Adds `student_device_enrollment_challenges` — server-side, single-use enrollment challenges stored as a SHA-256 hash only (`challenge_hash`), bound to a student, with status `ACTIVE`/`USED`/`EXPIRED` and a partial unique index `one_active_device_enrollment_challenge` enforcing at most one `ACTIVE` challenge per student.
 
 ## How to apply the migrations
 

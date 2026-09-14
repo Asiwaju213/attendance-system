@@ -5,6 +5,7 @@ import adminCoursesRouter from "./routes/adminCourses";
 import adminOrganizationRouter from "./routes/adminOrganization";
 import adminStudentImportRouter from "./routes/adminStudentImport";
 import authRouter from "./routes/auth";
+import studentDeviceRouter from "./routes/studentDevice";
 import studentRegistrationRouter from "./routes/studentRegistration";
 
 export const app = express();
@@ -37,6 +38,7 @@ app.use("/api/admin", adminCoursesRouter);
 app.use("/api/admin", adminCourseOfferingsRouter);
 app.use("/api/admin", adminStudentImportRouter);
 app.use("/api/student", studentRegistrationRouter);
+app.use("/api/student", studentDeviceRouter);
 
 // Centralized error handler: never leak internal details to clients.
 app.use((err: Error, _req: Request, res: Response, _next: NextFunction) => {
