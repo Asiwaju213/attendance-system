@@ -6,6 +6,7 @@ import { ProtectedRoute } from "./ProtectedRoute";
 import { useAuth } from "./useAuth";
 import { AdminHomePage } from "../pages/AdminHomePage";
 import { AdminLoginPage } from "../pages/AdminLoginPage";
+import { AdminAttendancePage } from "../pages/AdminAttendancePage";
 import { LecturerHomePage } from "../pages/LecturerHomePage";
 import { LecturerAttendancePage } from "../pages/LecturerAttendancePage";
 import { LecturerLoginPage } from "../pages/LecturerLoginPage";
@@ -126,6 +127,14 @@ export function AppRoutes() {
           element={
             <ProtectedRoute role="ADMIN">
               <AdminHomePage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/app/admin/attendance"
+          element={
+            <ProtectedRoute role="ADMIN">
+              <AdminAttendancePage />
             </ProtectedRoute>
           }
         />

@@ -8,6 +8,7 @@ const E2E_FACULTY_CODE = "E2EFAC";
 
 const E2E_STUDENT_MATRIC = "E2E/STU/0001";
 const E2E_LECTURER_STAFF_ID = "E2E/LEC/0001";
+const E2E_MONITOR_LECTURER_STAFF_ID = "E2E/LEC/0002";
 const E2E_ADMIN_USERNAME = "e2e_admin";
 
 const E2E_NETWORK_CODE = "E2E-NET-001";
@@ -41,6 +42,13 @@ const E2E_USERS: E2EUser[] = [
     staffId: E2E_LECTURER_STAFF_ID,
   },
   {
+    name: "E2E Monitor Lecturer",
+    role: "LECTURER",
+    username: null,
+    matricNumber: null,
+    staffId: E2E_MONITOR_LECTURER_STAFF_ID,
+  },
+  {
     name: "E2E Admin",
     role: "ADMIN",
     username: E2E_ADMIN_USERNAME,
@@ -56,9 +64,13 @@ async function findE2EUserIds(): Promise<number[]> {
        LEFT JOIN students s ON s.user_id = u.id
        LEFT JOIN lecturers l ON l.user_id = u.id
       WHERE s.matric_number = $1
-         OR l.staff_id = $2
+         OR l.staff_id = ANY($2::TEXT[])
          OR u.username = $3`,
-    [E2E_STUDENT_MATRIC, E2E_LECTURER_STAFF_ID, E2E_ADMIN_USERNAME]
+    [
+      E2E_STUDENT_MATRIC,
+      [E2E_LECTURER_STAFF_ID, E2E_MONITOR_LECTURER_STAFF_ID],
+      E2E_ADMIN_USERNAME,
+    ]
   );
   return result.rows.map((row) => Number(row.id));
 }
@@ -157,7 +169,7 @@ async function seed(): Promise<void> {
 
   const passwordHash = await hashPassword(E2E_PASSWORD);
 
-  let lecturerProfileId: number | null = null;
+  const lecturerProfileIds = new Map<string, number>();
 
   for (const user of E2E_USERS) {
     const inserted = await pool.query(
@@ -181,12 +193,16 @@ async function seed(): Promise<void> {
          RETURNING id`,
         [userId, user.staffId, departmentId]
       );
-      lecturerProfileId = Number(lecturer.rows[0].id);
+      lecturerProfileIds.set(user.staffId, Number(lecturer.rows[0].id));
     }
   }
 
-  if (lecturerProfileId === null) {
-    throw new Error("E2E lecturer profile was not created.");
+  const lecturerProfileId = lecturerProfileIds.get(E2E_LECTURER_STAFF_ID);
+  const monitorLecturerProfileId = lecturerProfileIds.get(
+    E2E_MONITOR_LECTURER_STAFF_ID
+  );
+  if (lecturerProfileId === undefined || monitorLecturerProfileId === undefined) {
+    throw new Error("E2E lecturer profiles were not created.");
   }
 
   await pool.query(
@@ -301,6 +317,34 @@ async function seed(): Promise<void> {
      VALUES ($1, $2)
      ON CONFLICT (course_offering_id, lecturer_id) DO NOTHING`,
     [closedOfferingId, lecturerProfileId]
+  );
+  await pool.query(
+    `INSERT INTO course_offering_lecturers (course_offering_id, lecturer_id)
+     VALUES ($1, $2)
+     ON CONFLICT (course_offering_id, lecturer_id) DO NOTHING`,
+    [openOfferingId, monitorLecturerProfileId]
+  );
+
+  await pool.query(
+    `INSERT INTO attendance_sessions
+       (course_offering_id, started_by_lecturer_id, attendance_network_id,
+        location_id, start_time, end_time, late_threshold, status, created_at)
+     VALUES
+       ($1, $2, $3, $4,
+        now() - interval '30 minutes', now() + interval '30 minutes',
+        interval '5 minutes', 'ACTIVE', now() - interval '30 minutes')`,
+    [openOfferingId, monitorLecturerProfileId, networkId, locationId]
+  );
+  await pool.query(
+    `INSERT INTO attendance_sessions
+       (course_offering_id, started_by_lecturer_id, attendance_network_id,
+        location_id, start_time, end_time, late_threshold, status, created_at, ended_at)
+     VALUES
+       ($1, $2, $3, $4,
+        now() - interval '2 days', now() - interval '2 days' + interval '60 minutes',
+        interval '5 minutes', 'ENDED', now() - interval '2 days',
+        now() - interval '2 days' + interval '60 minutes')`,
+    [openOfferingId, monitorLecturerProfileId, networkId, locationId]
   );
 
   console.log("Seeded E2E authentication users.");

@@ -21,6 +21,30 @@ export interface AttendanceSession {
   endedAt: string | null;
 }
 
+export interface AdminAttendanceSession extends AttendanceSession {
+  lecturerId: number;
+  lecturerStaffId: string;
+  lecturerName: string;
+  attendanceNetworkCode: string;
+  academicSessionId: number;
+  academicSessionName: string;
+  semesterId: number;
+  semesterName: string;
+  createdAt: string;
+}
+
+export interface AdminSessionFilters {
+  courseOfferingId?: number;
+  lecturerId?: number;
+  attendanceNetworkId?: number;
+  locationId?: number;
+  academicSessionId?: number;
+  semesterId?: number;
+  status?: SessionStatus;
+  from?: string;
+  to?: string;
+}
+
 export interface AttendanceNetwork {
   id: number;
   networkCode: string;
@@ -41,4 +65,20 @@ export interface LecturerCourseOffering {
   academicSessionName: string;
   semesterName: string;
   status: OfferingStatus;
+}
+
+export interface AdminCourseOffering {
+  id: number;
+  courseId: number;
+  courseCode: string;
+  courseTitle: string;
+  levelId: number;
+  levelName: number;
+  academicSessionId: number;
+  academicSessionName: string;
+  semesterId: number;
+  semesterName: string;
+  status: OfferingStatus;
+  createdAt: string;
+  updatedAt: string;
 }

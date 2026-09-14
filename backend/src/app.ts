@@ -1,11 +1,13 @@
 import express, { NextFunction, Request, Response } from "express";
 import { pool } from "./db/pool";
+import adminAcademicSessionsRouter from "./routes/adminAcademicSessions";
 import adminAttendanceNetworksRouter from "./routes/adminAttendanceNetworks";
 import adminAttendanceSessionsRouter from "./routes/adminAttendanceSessions";
 import adminCourseOfferingsRouter from "./routes/adminCourseOfferings";
 import adminCoursesRouter from "./routes/adminCourses";
 import adminLocationsRouter from "./routes/adminLocations";
 import adminOrganizationRouter from "./routes/adminOrganization";
+import adminSemestersRouter from "./routes/adminSemesters";
 import adminStudentImportRouter from "./routes/adminStudentImport";
 import authRouter from "./routes/auth";
 import debugNetworkRouter from "./routes/debugNetwork";
@@ -39,6 +41,8 @@ app.get("/api/health", async (_req, res) => {
 });
 
 app.use("/api/auth", authRouter);
+app.use("/api/admin", adminAcademicSessionsRouter);
+app.use("/api/admin", adminSemestersRouter);
 app.use("/api/admin", adminOrganizationRouter);
 app.use("/api/admin", adminCoursesRouter);
 app.use("/api/admin", adminCourseOfferingsRouter);
