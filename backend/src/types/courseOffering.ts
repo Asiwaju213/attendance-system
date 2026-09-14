@@ -26,3 +26,13 @@ export interface AssignedLecturer {
   departmentId: number;
   assignedAt: Date;
 }
+
+export interface OfferingForLecturer {
+  id: number;
+  courseCode: string;
+  courseTitle: string;
+  levelName: number;
+  academicSessionName: string;
+  semesterName: string;
+  status: OfferingStatus;
+}

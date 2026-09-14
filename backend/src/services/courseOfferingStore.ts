@@ -2,6 +2,7 @@ import { pool } from "../db/pool";
 import {
   AssignedLecturer,
   CourseOffering,
+  OfferingForLecturer,
   OfferingStatus,
 } from "../types/courseOffering";
 import { OrganizationStatus } from "../types/organization";
@@ -271,6 +272,50 @@ export async function listOfferings(
     values
   );
   return result.rows.map(toOffering);
+}
+
+export async function listLecturerOpenOfferings(
+  userId: number
+): Promise<OfferingWriteResult<OfferingForLecturer[]>> {
+  const profile = await pool.query(`SELECT id FROM lecturers WHERE user_id = $1`, [
+    userId,
+  ]);
+  const profileRow = profile.rows[0];
+  if (!profileRow) {
+    return { ok: false, code: "LECTURER_NOT_FOUND" };
+  }
+  const lecturerId = Number(profileRow.id);
+
+  const result = await pool.query(
+    `SELECT o.id, c.course_code, c.title AS course_title,
+            c.level_id, l.name AS level_name,
+            o.academic_session_id, sess.name AS academic_session_name,
+            o.semester_id, sem.name AS semester_name,
+            o.status
+     FROM course_offering_lecturers col
+     JOIN course_offerings o ON o.id = col.course_offering_id
+     JOIN courses c ON c.id = o.course_id
+     JOIN levels l ON l.id = c.level_id
+     JOIN academic_sessions sess ON sess.id = o.academic_session_id
+     JOIN semesters sem ON sem.id = o.semester_id
+     WHERE col.lecturer_id = $1
+       AND o.status = 'OPEN'
+       AND c.status = 'ACTIVE'
+     ORDER BY sess.name ASC, sem.name ASC, c.course_code ASC`,
+    [lecturerId]
+  );
+
+  const offerings: OfferingForLecturer[] = result.rows.map((row) => ({
+    id: Number(row.id),
+    courseCode: row.course_code,
+    courseTitle: row.course_title,
+    levelName: Number(row.level_name),
+    academicSessionName: row.academic_session_name,
+    semesterName: row.semester_name,
+    status: row.status,
+  }));
+
+  return { ok: true, data: offerings };
 }
 
 export async function createOffering(

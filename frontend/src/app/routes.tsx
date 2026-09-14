@@ -7,7 +7,9 @@ import { useAuth } from "./useAuth";
 import { AdminHomePage } from "../pages/AdminHomePage";
 import { AdminLoginPage } from "../pages/AdminLoginPage";
 import { LecturerHomePage } from "../pages/LecturerHomePage";
+import { LecturerAttendancePage } from "../pages/LecturerAttendancePage";
 import { LecturerLoginPage } from "../pages/LecturerLoginPage";
+import { NetworkTestPage } from "../pages/NetworkTestPage";
 import { NotFoundPage } from "../pages/NotFoundPage";
 import { StaffLoginPage } from "../pages/StaffLoginPage";
 import { StudentHomePage } from "../pages/StudentHomePage";
@@ -53,6 +55,8 @@ export function AppRoutes() {
     <BrowserRouter>
       <Routes>
         <Route path="/" element={<RootRedirect />} />
+        {/* TEMPORARY network investigation page — remove with NetworkTestPage. */}
+        <Route path="/network-test" element={<NetworkTestPage />} />
         <Route
           path="/login"
           element={
@@ -106,6 +110,14 @@ export function AppRoutes() {
           element={
             <ProtectedRoute role="LECTURER">
               <LecturerHomePage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/app/lecturer/attendance"
+          element={
+            <ProtectedRoute role="LECTURER">
+              <LecturerAttendancePage />
             </ProtectedRoute>
           }
         />

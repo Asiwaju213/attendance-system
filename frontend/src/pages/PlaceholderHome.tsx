@@ -1,4 +1,5 @@
 import { useState } from "react";
+import type { ReactNode } from "react";
 import { useNavigate } from "react-router-dom";
 import { LoadingPage } from "../components/LoadingPage";
 import { useAuth } from "../app/useAuth";
@@ -6,6 +7,7 @@ import { useAuth } from "../app/useAuth";
 interface PlaceholderHomeProps {
   heading: string;
   loginPath: string;
+  children?: ReactNode;
 }
 
 function identifierLabel(role: "STUDENT" | "LECTURER" | "ADMIN"): string {
@@ -19,7 +21,7 @@ function identifierLabel(role: "STUDENT" | "LECTURER" | "ADMIN"): string {
   }
 }
 
-export function PlaceholderHome({ heading, loginPath }: PlaceholderHomeProps) {
+export function PlaceholderHome({ heading, loginPath, children }: PlaceholderHomeProps) {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
   const [isLoggingOut, setIsLoggingOut] = useState(false);
@@ -64,6 +66,7 @@ export function PlaceholderHome({ heading, loginPath }: PlaceholderHomeProps) {
           <span className="app-detail__label">{identifierLabel(user.role)}: </span>
           {identifier ?? "Not available"}
         </p>
+        {children !== undefined ? <div className="app-card__actions">{children}</div> : null}
         <button
           type="button"
           className="auth-submit"

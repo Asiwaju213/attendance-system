@@ -755,7 +755,7 @@ test("identity changes are rejected when attendance records exist", async () => 
      VALUES ('ADMCOF-NET', 'Offering Test Network') RETURNING id`
   );
   const location = await pool.query(
-    `INSERT INTO locations (name) VALUES ('Offering Test Location') RETURNING id`
+    `INSERT INTO locations (name) VALUES ('ADMCOF-LOCATION') RETURNING id`
   );
   const session = await pool.query(
     `INSERT INTO attendance_sessions

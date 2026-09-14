@@ -5,11 +5,13 @@ interface RequestOptions {
 
 export class ApiError extends Error {
   readonly status: number;
+  readonly code: string | null;
 
-  constructor(status: number) {
+  constructor(status: number, code: string | null = null) {
     super(`Request failed with status ${status}.`);
     this.name = "ApiError";
     this.status = status;
+    this.code = code;
   }
 }
 
@@ -34,7 +36,16 @@ export async function apiRequest<T>(
   });
 
   if (!response.ok) {
-    throw new ApiError(response.status);
+    let code: string | null = null;
+    try {
+      const payload = (await response.json()) as { error?: unknown };
+      if (typeof payload.error === "string") {
+        code = payload.error;
+      }
+    } catch {
+      // Non-JSON error bodies carry no code.
+    }
+    throw new ApiError(response.status, code);
   }
 
   if (response.status === 204) {

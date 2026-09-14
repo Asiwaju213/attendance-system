@@ -1,10 +1,16 @@
 import express, { NextFunction, Request, Response } from "express";
 import { pool } from "./db/pool";
+import adminAttendanceNetworksRouter from "./routes/adminAttendanceNetworks";
+import adminAttendanceSessionsRouter from "./routes/adminAttendanceSessions";
 import adminCourseOfferingsRouter from "./routes/adminCourseOfferings";
 import adminCoursesRouter from "./routes/adminCourses";
+import adminLocationsRouter from "./routes/adminLocations";
 import adminOrganizationRouter from "./routes/adminOrganization";
 import adminStudentImportRouter from "./routes/adminStudentImport";
 import authRouter from "./routes/auth";
+import debugNetworkRouter from "./routes/debugNetwork";
+import lecturerAttendanceSessionsRouter from "./routes/lecturerAttendanceSessions";
+import lecturerCatalogRouter from "./routes/lecturerCatalog";
 import studentDeviceRouter from "./routes/studentDevice";
 import studentRegistrationRouter from "./routes/studentRegistration";
 
@@ -37,8 +43,17 @@ app.use("/api/admin", adminOrganizationRouter);
 app.use("/api/admin", adminCoursesRouter);
 app.use("/api/admin", adminCourseOfferingsRouter);
 app.use("/api/admin", adminStudentImportRouter);
+app.use("/api/admin", adminAttendanceNetworksRouter);
+app.use("/api/admin", adminAttendanceSessionsRouter);
+app.use("/api/admin", adminLocationsRouter);
 app.use("/api/student", studentRegistrationRouter);
 app.use("/api/student", studentDeviceRouter);
+app.use("/api/lecturer", lecturerCatalogRouter);
+app.use("/api/lecturer", lecturerAttendanceSessionsRouter);
+
+// TEMPORARY: network investigation endpoint (unauthenticated, read-only).
+// Remove this mount and `routes/debugNetwork.ts` once the investigation ends.
+app.use("/api/debug", debugNetworkRouter);
 
 // Centralized error handler: never leak internal details to clients.
 app.use((err: Error, _req: Request, res: Response, _next: NextFunction) => {

@@ -235,3 +235,262 @@ body {
 .app-detail__label {
   color: var(--color-text-muted);
 }
+
+.app-page {
+  min-height: 100svh;
+  max-width: 860px;
+  margin: 0 auto;
+  padding: 24px;
+}
+
+.app-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 8px 16px;
+  margin-bottom: 20px;
+}
+
+.app-header h1 {
+  margin: 0;
+  font-size: 26px;
+  color: var(--color-text);
+}
+
+.app-header__sub {
+  margin: 4px 0 0;
+  color: var(--color-text-muted);
+}
+
+.app-header__nav {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.app-header__nav a {
+  color: var(--color-accent);
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.app-card--wide {
+  max-width: none;
+  margin-bottom: 16px;
+}
+
+.app-card h2 {
+  margin: 0 0 16px;
+  font-size: 20px;
+  color: var(--color-text);
+}
+
+.app-card__actions {
+  margin-top: 16px;
+}
+
+.auth-submit.home-link {
+  display: block;
+  text-decoration: none;
+  text-align: center;
+}
+
+.inline-status {
+  margin: 0;
+  color: var(--color-text-muted);
+}
+
+.resource-error {
+  margin-bottom: 12px;
+}
+
+.resource-error .form-error {
+  margin-bottom: 8px;
+}
+
+.note {
+  margin: 0 0 16px;
+  color: var(--color-text-muted);
+}
+
+.secondary-button,
+.danger-button {
+  padding: 10px 14px;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--color-text);
+  background: var(--color-card);
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.secondary-button:hover:not(:disabled) {
+  border-color: var(--color-accent);
+  color: var(--color-accent);
+}
+
+.danger-button {
+  color: var(--color-error);
+  border-color: var(--color-error);
+  background: var(--color-error-bg);
+}
+
+.danger-button:hover:not(:disabled) {
+  color: #ffffff;
+  background: var(--color-error);
+}
+
+.secondary-button:disabled,
+.danger-button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.secondary-button:focus-visible,
+.danger-button:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 1px;
+}
+
+.form-fields {
+  border: none;
+  margin: 0;
+  padding: 0;
+}
+
+.form-fields[disabled] {
+  opacity: 0.65;
+}
+
+.form-fields[disabled] .auth-submit {
+  cursor: not-allowed;
+}
+
+.field--inner {
+  margin: 8px 0 0;
+}
+
+.preset-fieldset {
+  border: none;
+  margin: 0;
+  padding: 0;
+}
+
+.preset-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.preset-option {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 10px;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 14px;
+  color: var(--color-text);
+}
+
+.preset-option:has(input:focus-visible) {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 1px;
+}
+
+.preset-option input {
+  accent-color: var(--color-accent);
+}
+
+.session-summary {
+  margin: 16px 0;
+  padding: 12px 14px;
+  border: 1px dashed var(--color-border);
+  border-radius: 8px;
+  font-size: 14px;
+}
+
+.session-summary p {
+  margin: 4px 0;
+}
+
+.session-summary__title {
+  margin: 0 0 6px;
+  font-weight: 600;
+}
+
+.session-detail__title {
+  margin: 0 0 6px;
+  font-size: 17px;
+  font-weight: 600;
+}
+
+.session-detail p {
+  margin: 4px 0;
+}
+
+.session-status {
+  font-weight: 600;
+}
+
+.session-status--active {
+  color: var(--color-accent);
+}
+
+.session-status--expired,
+.session-status--ended {
+  color: var(--color-text-muted);
+}
+
+.session-detail__countdown {
+  color: var(--color-accent);
+  font-weight: 600;
+}
+
+.session-detail__expired {
+  color: var(--color-error);
+  font-weight: 600;
+}
+
+.session-end {
+  margin-top: 14px;
+}
+
+.confirm-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+.confirm-row span {
+  font-weight: 600;
+}
+
+.session-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 12px;
+}
+
+.session-list__item {
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  padding: 12px 14px;
+}
+
+.session-list__title {
+  margin: 0 0 2px;
+  font-weight: 600;
+}
+
+.session-list__meta {
+  margin: 0;
+  font-size: 14px;
+  color: var(--color-text-muted);
+}
