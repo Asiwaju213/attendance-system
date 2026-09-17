@@ -82,3 +82,92 @@ export interface AdminCourseOffering {
   createdAt: string;
   updatedAt: string;
 }
+
+export type AttendanceState = "NOT_MARKED" | "PRESENT" | "LATE";
+
+export type AttendanceRecordStatus = "PRESENT" | "LATE";
+
+export interface EligibleAttendanceSession {
+  id: number;
+  courseOfferingId: number;
+  courseCode: string;
+  courseTitle: string;
+  startTime: string;
+  endTime: string;
+  lateThresholdMinutes: number;
+  attendanceNetworkName: string;
+  locationName: string;
+  currentAttendanceState: AttendanceState;
+}
+
+export interface MarkedAttendance {
+  id: number;
+  attendanceSessionId: number;
+  studentId: number;
+  status: AttendanceRecordStatus;
+  markedAt: string;
+  courseCode: string;
+  courseTitle: string;
+}
+
+export interface AdminAttendanceRecord {
+  id: number;
+  studentId: number;
+  matricNumber: string;
+  studentName: string;
+  courseCode: string;
+  courseTitle: string;
+  sessionId: number;
+  sessionStartTime: string;
+  sessionEndTime: string;
+  previousStatus: AttendanceRecordStatus;
+  status: AttendanceRecordStatus;
+  markedAt: string;
+}
+
+export interface CorrectAttendanceRecordInput {
+  status: AttendanceRecordStatus;
+}
+
+export interface CorrectAttendanceRecordResponse {
+  data: AdminAttendanceRecord;
+}
+
+export interface CourseOfferingReportLecturer {
+  id: number;
+  userId: number;
+  staffId: string;
+  name: string;
+}
+
+export interface CourseOfferingReportContext {
+  id: number;
+  courseId: number;
+  courseCode: string;
+  courseTitle: string;
+  academicSessionId: number;
+  academicSessionName: string;
+  semesterId: number;
+  semesterName: string;
+  levelId: number;
+  levelName: number;
+  lecturers: CourseOfferingReportLecturer[];
+  totalCompletedSessions: number;
+}
+
+export interface CourseOfferingStudentAttendance {
+  studentId: number;
+  userId: number;
+  matricNumber: string;
+  studentName: string;
+  totalCompletedSessions: number;
+  presentCount: number;
+  lateCount: number;
+  absentCount: number;
+  attendancePercentage: number | null;
+}
+
+export interface CourseOfferingAttendanceReport {
+  courseOffering: CourseOfferingReportContext;
+  students: CourseOfferingStudentAttendance[];
+}

@@ -13,4 +13,17 @@ export default function globalTeardown(): void {
   } catch (error) {
     console.warn("Failed to clean up E2E users:", (error as Error).message);
   }
+
+  // Clean up academic-period test data created by admin-academic-periods.spec.ts
+  try {
+    execSync("node", [
+      join(__dirname, "helpers", "cleanup-academic-periods.cjs"),
+    ], {
+      cwd: backendDir,
+      stdio: "inherit",
+      timeout: 60_000,
+    });
+  } catch (error) {
+    console.warn("Failed to clean up academic-period E2E data:", (error as Error).message);
+  }
 }

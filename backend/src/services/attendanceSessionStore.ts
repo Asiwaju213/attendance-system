@@ -1,6 +1,8 @@
 import { pool } from "../db/pool";
 import {
+  AdminAttendanceRecord,
   AdminAttendanceSession,
+  AttendanceRecordStatus,
   AttendanceSession,
 } from "../types/attendanceSession";
 import { AdminAttendanceSessionFilters } from "../validation/adminAttendanceSessionValidation";
@@ -498,4 +500,40 @@ export async function getAdminSessionById(
     return null;
   }
   return toAdminSession(result.rows[0]);
+}
+
+export async function listAdminAttendanceRecords(
+  sessionId: number
+): Promise<AdminAttendanceRecord[]> {
+  const result = await pool.query(
+    `SELECT ar.id, ar.status, ar.marked_at,
+            st.id AS student_id, st.matric_number,
+            su.name AS student_name,
+            c.course_code, c.title AS course_title,
+            s.id AS session_id, s.start_time AS session_start_time,
+            s.end_time AS session_end_time
+     FROM attendance_records ar
+     JOIN students st ON st.id = ar.student_id
+     JOIN users su ON su.id = st.user_id
+     JOIN attendance_sessions s ON s.id = ar.session_id
+     JOIN course_offerings o ON o.id = s.course_offering_id
+     JOIN courses c ON c.id = o.course_id
+     WHERE ar.session_id = $1
+     ORDER BY su.name, st.matric_number`,
+    [sessionId]
+  );
+  return result.rows.map((row) => ({
+    id: Number(row.id),
+    studentId: Number(row.student_id),
+    matricNumber: row.matric_number,
+    studentName: row.student_name,
+    courseCode: row.course_code,
+    courseTitle: row.course_title,
+    sessionId: Number(row.session_id),
+    sessionStartTime: row.session_start_time.toISOString(),
+    sessionEndTime: row.session_end_time.toISOString(),
+    previousStatus: row.status,
+    status: row.status as AttendanceRecordStatus,
+    markedAt: row.marked_at.toISOString(),
+  }));
 }

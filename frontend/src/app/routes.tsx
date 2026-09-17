@@ -7,6 +7,8 @@ import { useAuth } from "./useAuth";
 import { AdminHomePage } from "../pages/AdminHomePage";
 import { AdminLoginPage } from "../pages/AdminLoginPage";
 import { AdminAttendancePage } from "../pages/AdminAttendancePage";
+import { AdminAttendanceReportsPage } from "../pages/AdminAttendanceReportsPage";
+import { AdminAcademicPeriodsPage } from "../pages/AdminAcademicPeriodsPage";
 import { LecturerHomePage } from "../pages/LecturerHomePage";
 import { LecturerAttendancePage } from "../pages/LecturerAttendancePage";
 import { LecturerLoginPage } from "../pages/LecturerLoginPage";
@@ -14,6 +16,7 @@ import { NetworkTestPage } from "../pages/NetworkTestPage";
 import { NotFoundPage } from "../pages/NotFoundPage";
 import { StaffLoginPage } from "../pages/StaffLoginPage";
 import { StudentHomePage } from "../pages/StudentHomePage";
+import { StudentAttendancePage } from "../pages/StudentAttendancePage";
 import { StudentLoginPage } from "../pages/StudentLoginPage";
 import { StudentRegisterPage } from "../pages/StudentRegisterPage";
 
@@ -107,6 +110,14 @@ export function AppRoutes() {
           }
         />
         <Route
+          path="/app/student/attendance"
+          element={
+            <ProtectedRoute role="STUDENT">
+              <StudentAttendancePage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
           path="/app/lecturer"
           element={
             <ProtectedRoute role="LECTURER">
@@ -135,6 +146,22 @@ export function AppRoutes() {
           element={
             <ProtectedRoute role="ADMIN">
               <AdminAttendancePage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/app/admin/attendance-reports"
+          element={
+            <ProtectedRoute role="ADMIN">
+              <AdminAttendanceReportsPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/app/admin/academic-periods"
+          element={
+            <ProtectedRoute role="ADMIN">
+              <AdminAcademicPeriodsPage />
             </ProtectedRoute>
           }
         />

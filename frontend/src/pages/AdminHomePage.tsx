@@ -7,6 +7,12 @@ export function AdminHomePage() {
       <Link to="/app/admin/attendance" className="auth-submit home-link">
         Attendance Monitoring
       </Link>
+      <Link to="/app/admin/attendance-reports" className="auth-submit home-link">
+        Attendance Reports
+      </Link>
+      <Link to="/app/admin/academic-periods" className="auth-submit home-link">
+        Academic Sessions &amp; Semesters
+      </Link>
     </PlaceholderHome>
   );
 }

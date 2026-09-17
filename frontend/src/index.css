@@ -9,6 +9,7 @@
   --color-accent-hover: #7728ad;
   --color-error: #b3261e;
   --color-error-bg: #fdeceb;
+  --color-success: #137333;
 
   font-family: system-ui, "Segoe UI", Roboto, sans-serif;
   font-size: 16px;
@@ -34,6 +35,7 @@
     --color-accent-hover: #a76bf0;
     --color-error: #ffb4ab;
     --color-error-bg: rgba(179, 38, 30, 0.18);
+    --color-success: #7fd68a;
   }
 }
 
@@ -495,6 +497,42 @@ body {
   color: var(--color-text-muted);
 }
 
+.session-mark {
+  margin-top: 12px;
+}
+
+.session-mark .auth-submit {
+  margin-top: 0;
+  width: auto;
+  padding: 10px 18px;
+}
+
+.mark-confirmation {
+  margin: 0 0 16px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  color: var(--color-success);
+  background: color-mix(in srgb, var(--color-success) 10%, transparent);
+  font-size: 14px;
+}
+
+.mark-confirmation strong {
+  text-transform: capitalize;
+}
+
+.attendance-state {
+  margin: 8px 0 0;
+  font-weight: 600;
+}
+
+.attendance-state--present {
+  color: var(--color-success);
+}
+
+.attendance-state--late {
+  color: var(--color-error);
+}
+
 .admin-filter-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
@@ -591,4 +629,51 @@ body {
   margin: 12px 0 0;
   color: var(--color-text-muted);
   font-size: 14px;
+}
+
+.report-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.report-actions .form-error {
+  margin: 0;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.admin-inline-form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 10px;
+  max-width: 620px;
+}
+
+.admin-inline-form .field {
+  margin-bottom: 0;
+}
+
+.admin-inline-field {
+  flex: 1 1 240px;
+  min-width: 240px;
+}
+
+.admin-inline-form .confirm-row {
+  margin-top: 6px;
+}
+
+.academic-status--inactive {
+  color: var(--color-text-muted);
 }

@@ -1,4 +1,5 @@
 import {
+  generateAuthenticationOptions,
   generateRegistrationOptions,
   verifyAuthenticationResponse,
   verifyRegistrationResponse,
@@ -6,6 +7,7 @@ import {
 import type {
   AuthenticationResponseJSON,
   PublicKeyCredentialCreationOptionsJSON,
+  PublicKeyCredentialRequestOptionsJSON,
   RegistrationResponseJSON,
   WebAuthnCredential,
 } from "@simplewebauthn/server";
@@ -54,6 +56,35 @@ export async function createStudentDeviceRegistrationOptions(
     },
     supportedAlgorithmIDs: [-7],
     excludeCredentials: options.excludeCredentials,
+    timeout: 60_000,
+  });
+}
+
+export interface CreateStudentDeviceRequestOptionsParams {
+  rpID: string;
+  /** The student's enrolled credential, scoped via allowCredentials. */
+  credential: { id: string; transports?: string[] | null };
+}
+
+/**
+ * Build the request options for a student device assertion (the attendance-time
+ * authentication path).  The returned `challenge` must be stored server-side (hash only)
+ * and the browser signs it with the enrolled private key via `navigator.credentials.get()`.
+ */
+export async function createStudentDeviceRequestOptions(
+  options: CreateStudentDeviceRequestOptionsParams
+): Promise<PublicKeyCredentialRequestOptionsJSON> {
+  return generateAuthenticationOptions({
+    rpID: options.rpID,
+    allowCredentials: [
+      {
+        id: options.credential.id,
+        ...(options.credential.transports && options.credential.transports.length > 0
+          ? { transports: options.credential.transports }
+          : {}),
+      },
+    ],
+    userVerification: "preferred",
     timeout: 60_000,
   });
 }

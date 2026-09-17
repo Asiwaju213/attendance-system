@@ -85,6 +85,33 @@ export async function findActiveDeviceByStudentId(
   return result.rows[0] ?? null;
 }
 
+/**
+ * Return the most recently enrolled device for a student regardless of status.  Used to
+ * distinguish "no device ever enrolled" from "device exists but is not ACTIVE".
+ */
+export async function findLatestDeviceByStudentId(
+  studentId: number
+): Promise<StoredDeviceRow | null> {
+  const result = await pool.query(
+    `SELECT * FROM student_devices
+     WHERE student_id = $1
+     ORDER BY id DESC
+     LIMIT 1`,
+    [studentId]
+  );
+  return result.rows[0] ?? null;
+}
+
+export async function updateDeviceCounter(
+  deviceId: number,
+  counter: number
+): Promise<void> {
+  await pool.query(
+    `UPDATE student_devices SET counter = $2 WHERE id = $1`,
+    [deviceId, counter]
+  );
+}
+
 export async function findDeviceByCredentialId(
   credentialId: string
 ): Promise<StoredDeviceRow | null> {

@@ -9,6 +9,7 @@ const E2E_FACULTY_CODE = "E2EFAC";
 const E2E_STUDENT_MATRIC = "E2E/STU/0001";
 const E2E_LECTURER_STAFF_ID = "E2E/LEC/0001";
 const E2E_MONITOR_LECTURER_STAFF_ID = "E2E/LEC/0002";
+const E2E_STUDENT_MARK_LECTURER_STAFF_ID = "E2E/LEC/0003";
 const E2E_ADMIN_USERNAME = "e2e_admin";
 
 const E2E_NETWORK_CODE = "E2E-NET-001";
@@ -49,6 +50,13 @@ const E2E_USERS: E2EUser[] = [
     staffId: E2E_MONITOR_LECTURER_STAFF_ID,
   },
   {
+    name: "E2E Student Mark Lecturer",
+    role: "LECTURER",
+    username: null,
+    matricNumber: null,
+    staffId: E2E_STUDENT_MARK_LECTURER_STAFF_ID,
+  },
+  {
     name: "E2E Admin",
     role: "ADMIN",
     username: E2E_ADMIN_USERNAME,
@@ -68,7 +76,11 @@ async function findE2EUserIds(): Promise<number[]> {
          OR u.username = $3`,
     [
       E2E_STUDENT_MATRIC,
-      [E2E_LECTURER_STAFF_ID, E2E_MONITOR_LECTURER_STAFF_ID],
+      [
+        E2E_LECTURER_STAFF_ID,
+        E2E_MONITOR_LECTURER_STAFF_ID,
+        E2E_STUDENT_MARK_LECTURER_STAFF_ID,
+      ],
       E2E_ADMIN_USERNAME,
     ]
   );
@@ -89,10 +101,30 @@ async function cleanup(): Promise<void> {
       [userIds]
     );
     await pool.query(
+      `DELETE FROM attendance_records
+       WHERE student_id IN (SELECT id FROM students WHERE user_id = ANY($1::BIGINT[]))
+         AND session_id NOT IN (
+           SELECT id FROM attendance_sessions WHERE started_by_lecturer_id IN (
+             SELECT id FROM lecturers WHERE user_id = ANY($1::BIGINT[])
+           )
+         )`,
+      [userIds]
+    );
+    await pool.query(
       `DELETE FROM attendance_sessions
        WHERE started_by_lecturer_id IN (
          SELECT id FROM lecturers WHERE user_id = ANY($1::BIGINT[])
        )`,
+      [userIds]
+    );
+    await pool.query(
+      `DELETE FROM student_device_enrollment_challenges
+       WHERE student_id IN (SELECT id FROM students WHERE user_id = ANY($1::BIGINT[]))`,
+      [userIds]
+    );
+    await pool.query(
+      `DELETE FROM student_devices
+       WHERE student_id IN (SELECT id FROM students WHERE user_id = ANY($1::BIGINT[]))`,
       [userIds]
     );
     await pool.query(
@@ -170,6 +202,7 @@ async function seed(): Promise<void> {
   const passwordHash = await hashPassword(E2E_PASSWORD);
 
   const lecturerProfileIds = new Map<string, number>();
+  let studentProfileId: number | null = null;
 
   for (const user of E2E_USERS) {
     const inserted = await pool.query(
@@ -181,11 +214,13 @@ async function seed(): Promise<void> {
     const userId = Number(inserted.rows[0].id);
 
     if (user.role === "STUDENT" && user.matricNumber !== null) {
-      await pool.query(
+      const student = await pool.query(
         `INSERT INTO students (user_id, matric_number, department_id, level_id)
-         VALUES ($1, $2, $3, $4)`,
+         VALUES ($1, $2, $3, $4)
+         RETURNING id`,
         [userId, user.matricNumber, departmentId, levelId]
       );
+      studentProfileId = Number(student.rows[0].id);
     } else if (user.role === "LECTURER" && user.staffId !== null) {
       const lecturer = await pool.query(
         `INSERT INTO lecturers (user_id, staff_id, department_id)
@@ -201,7 +236,14 @@ async function seed(): Promise<void> {
   const monitorLecturerProfileId = lecturerProfileIds.get(
     E2E_MONITOR_LECTURER_STAFF_ID
   );
-  if (lecturerProfileId === undefined || monitorLecturerProfileId === undefined) {
+  const studentMarkLecturerProfileId = lecturerProfileIds.get(
+    E2E_STUDENT_MARK_LECTURER_STAFF_ID
+  );
+  if (
+    lecturerProfileId === undefined ||
+    monitorLecturerProfileId === undefined ||
+    studentMarkLecturerProfileId === undefined
+  ) {
     throw new Error("E2E lecturer profiles were not created.");
   }
 
@@ -324,6 +366,22 @@ async function seed(): Promise<void> {
      ON CONFLICT (course_offering_id, lecturer_id) DO NOTHING`,
     [openOfferingId, monitorLecturerProfileId]
   );
+  await pool.query(
+    `INSERT INTO course_offering_lecturers (course_offering_id, lecturer_id)
+     VALUES ($1, $2)
+     ON CONFLICT (course_offering_id, lecturer_id) DO NOTHING`,
+    [openOfferingId, studentMarkLecturerProfileId]
+  );
+
+  if (studentProfileId === null) {
+    throw new Error("E2E student profile was not created.");
+  }
+  await pool.query(
+    `INSERT INTO course_registrations (student_id, course_offering_id, status)
+     VALUES ($1, $2, 'ENROLLED')
+     ON CONFLICT (student_id, course_offering_id) DO NOTHING`,
+    [studentProfileId, openOfferingId]
+  );
 
   await pool.query(
     `INSERT INTO attendance_sessions
@@ -346,6 +404,46 @@ async function seed(): Promise<void> {
         now() - interval '2 days' + interval '60 minutes')`,
     [openOfferingId, monitorLecturerProfileId, networkId, locationId]
   );
+  // An ACTIVE session for the student-marking tests, intentionally left
+  // unmarked so the student spec sees an eligible session with a mark action.
+  // A separate lecturer is used so the admin monitoring fixtures (exactly two
+  // sessions/records for the monitor lecturer) and the lecturer attendance
+  // fixtures (E2E/LEC/0001 starts its own sessions) stay independent.
+  await pool.query(
+    `INSERT INTO attendance_sessions
+       (course_offering_id, started_by_lecturer_id, attendance_network_id,
+        location_id, start_time, end_time, late_threshold, status, created_at)
+     VALUES
+       ($1, $2, $3, $4,
+        now() - interval '30 minutes', now() + interval '30 minutes',
+        interval '5 minutes', 'ACTIVE', now() - interval '30 minutes')`,
+    [openOfferingId, studentMarkLecturerProfileId, networkId, locationId]
+  );
+
+  // Seed attendance records for the E2E student in both monitor sessions
+  const sessionRes = await pool.query(
+    `SELECT id FROM attendance_sessions
+     WHERE course_offering_id = $1 AND started_by_lecturer_id = $2
+     ORDER BY start_time`,
+    [openOfferingId, monitorLecturerProfileId]
+  );
+  const sessionIds = sessionRes.rows.map((r) => Number(r.id));
+  if (sessionIds.length >= 2) {
+    // First session: PRESENT
+    await pool.query(
+      `INSERT INTO attendance_records (session_id, student_id, status, marked_at)
+       VALUES ($1, $2, 'PRESENT', now() - interval '15 minutes')
+       ON CONFLICT (session_id, student_id) DO NOTHING`,
+      [sessionIds[0], studentProfileId]
+    );
+    // Second session: LATE
+    await pool.query(
+      `INSERT INTO attendance_records (session_id, student_id, status, marked_at)
+       VALUES ($1, $2, 'LATE', now() - interval '1 day')
+       ON CONFLICT (session_id, student_id) DO NOTHING`,
+      [sessionIds[1], studentProfileId]
+    );
+  }
 
   console.log("Seeded E2E authentication users.");
 }

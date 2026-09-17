@@ -40,6 +40,10 @@ export const webauthnConfig = {
   // How long a device-enrollment challenge stays usable before it becomes unverifiable.
   challengeTtlMs: 10 * 60 * 1000,
 
+  // How long an attendance device-verification challenge stays usable.  Shorter than
+  // enrollment because attendance happens in-class on a known device.
+  attendanceChallengeTtlMs: 5 * 60 * 1000,
+
   // WebAuthn is configured for the platform authenticator (Windows Hello, Touch ID,
   // Android biometrics, ...) with discoverable credentials, matching the passkeys
   // best practices. Only ES256 (ECDSA P-256) keys are accepted so verification works

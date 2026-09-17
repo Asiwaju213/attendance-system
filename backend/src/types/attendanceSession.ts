@@ -34,3 +34,47 @@ export interface AdminAttendanceSession extends AttendanceSession {
   semesterName: string;
   createdAt: string;
 }
+
+export const ATTENDANCE_STATES = ["NOT_MARKED", "PRESENT", "LATE"] as const;
+
+export type AttendanceState = (typeof ATTENDANCE_STATES)[number];
+
+export interface EligibleAttendanceSession {
+  id: number;
+  courseOfferingId: number;
+  courseCode: string;
+  courseTitle: string;
+  startTime: string;
+  endTime: string;
+  lateThresholdMinutes: number;
+  attendanceNetworkName: string;
+  locationName: string;
+  currentAttendanceState: AttendanceState;
+}
+
+export type AttendanceRecordStatus = "PRESENT" | "LATE";
+
+export interface AdminAttendanceRecord {
+  id: number;
+  studentId: number;
+  matricNumber: string;
+  studentName: string;
+  courseCode: string;
+  courseTitle: string;
+  sessionId: number;
+  sessionStartTime: string;
+  sessionEndTime: string;
+  previousStatus: AttendanceRecordStatus;
+  status: AttendanceRecordStatus;
+  markedAt: string;
+}
+
+export interface MarkedAttendance {
+  id: number;
+  attendanceSessionId: number;
+  studentId: number;
+  status: AttendanceRecordStatus;
+  markedAt: string;
+  courseCode: string;
+  courseTitle: string;
+}

@@ -1,11 +1,15 @@
 import { apiRequest } from "./client";
 import type {
+  AdminAttendanceRecord,
   AdminAttendanceSession,
   AdminCourseOffering,
   AdminSessionFilters,
   AttendanceLocation,
   AttendanceNetwork,
   AttendanceSession,
+  CorrectAttendanceRecordInput,
+  CorrectAttendanceRecordResponse,
+  CourseOfferingAttendanceReport,
   LecturerCourseOffering,
 } from "../types/attendance";
 
@@ -79,6 +83,14 @@ export function listAdminLocations(): Promise<{ data: AttendanceLocation[] }> {
   return apiRequest("/admin/locations");
 }
 
+export function getCourseOfferingAttendanceReport(
+  courseOfferingId: number
+): Promise<{ data: CourseOfferingAttendanceReport }> {
+  return apiRequest(
+    `/admin/attendance-reports/course-offering/${courseOfferingId}`
+  );
+}
+
 function buildFilterQuery(filters: AdminSessionFilters): string {
   const params = new URLSearchParams();
 
@@ -112,4 +124,20 @@ function buildFilterQuery(filters: AdminSessionFilters): string {
 
   const query = params.toString();
   return query === "" ? "" : `?${query}`;
+}
+
+export function correctAttendanceRecord(
+  recordId: number,
+  input: CorrectAttendanceRecordInput
+): Promise<CorrectAttendanceRecordResponse> {
+  return apiRequest(`/admin/attendance-records/${recordId}`, {
+    method: "PATCH",
+    body: input,
+  });
+}
+
+export function listAdminAttendanceRecords(
+  sessionId: number
+): Promise<{ data: AdminAttendanceRecord[] }> {
+  return apiRequest(`/admin/attendance-sessions/${sessionId}/records`);
 }

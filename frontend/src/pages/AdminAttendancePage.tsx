@@ -2,19 +2,25 @@ import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import type { FormEvent } from "react";
 import { ApiError } from "../api/client";
+import { attendanceErrorMessage } from "../app/attendanceErrors";
 import {
   getAdminAttendanceSession,
+  listAdminAttendanceRecords,
   listAdminAttendanceSessions,
   listAdminAttendanceNetworks,
   listAdminCourseOfferings,
   listAdminLocations,
+  correctAttendanceRecord,
 } from "../api/attendance";
 import type {
+  AdminAttendanceRecord,
   AdminAttendanceSession,
   AdminCourseOffering,
   AdminSessionFilters,
   AttendanceLocation,
   AttendanceNetwork,
+  AttendanceRecordStatus,
+  CorrectAttendanceRecordInput,
   SessionCurrentState,
   SessionStatus,
 } from "../types/attendance";
@@ -193,6 +199,19 @@ export function AdminAttendancePage() {
   const [detailLoading, setDetailLoading] = useState(false);
   const [detailError, setDetailError] = useState<string | null>(null);
 
+  const [records, setRecords] = useState<AdminAttendanceRecord[] | null>(null);
+  const [recordsLoading, setRecordsLoading] = useState(false);
+  const [recordsError, setRecordsError] = useState<string | null>(null);
+
+  const [correctingRecordId, setCorrectingRecordId] = useState<number | null>(null);
+  const [correctionError, setCorrectionError] = useState<string | null>(null);
+  const [confirmation, setConfirmation] = useState<{
+    recordId: number;
+    newStatus: AttendanceRecordStatus;
+    studentName: string;
+    courseCode: string;
+  } | null>(null);
+
   useEffect(() => {
     let cancelled = false;
     Promise.all([
@@ -265,6 +284,36 @@ export function AdminAttendancePage() {
       cancelled = true;
     };
   }, [selectedId, detailReloadKey]);
+
+  useEffect(() => {
+    if (selectedId === null) {
+      setRecords(null);
+      setRecordsError(null);
+      return;
+    }
+    let cancelled = false;
+    setRecordsLoading(true);
+    setRecordsError(null);
+    listAdminAttendanceRecords(selectedId)
+      .then((res) => {
+        if (!cancelled) {
+          setRecords(res.data);
+        }
+      })
+      .catch((error: unknown) => {
+        if (!cancelled) {
+          setRecordsError(attendanceErrorMessage(error));
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setRecordsLoading(false);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedId]);
 
   const academicSessionOptions = useMemo<Option[]>(() => {
     const seen = new Map<number, string>();
@@ -349,8 +398,57 @@ export function AdminAttendancePage() {
     }
     setDetail(null);
     setDetailError(null);
+    setRecords(null);
+    setRecordsError(null);
     setDetailLoading(true);
+    setRecordsLoading(true);
     setDetailReloadKey((prev) => prev + 1);
+  }
+
+  async function handleCorrect(record: AdminAttendanceRecord, newStatus: AttendanceRecordStatus) {
+    if (correctingRecordId !== null || correctionError !== null || confirmation !== null) {
+      return;
+    }
+
+    setCorrectionError(null);
+    setConfirmation({
+      recordId: record.id,
+      newStatus,
+      studentName: record.studentName,
+      courseCode: record.courseCode,
+    });
+  }
+
+  async function handleConfirmCorrection() {
+    if (!confirmation || correctingRecordId !== null) {
+      return;
+    }
+
+    setCorrectingRecordId(confirmation.recordId);
+    setCorrectionError(null);
+
+    try {
+      const input: CorrectAttendanceRecordInput = { status: confirmation.newStatus };
+      const res = await correctAttendanceRecord(confirmation.recordId, input);
+
+      const updatedRecord = res.data;
+      setRecords((prev) =>
+        prev
+          ? prev.map((r) => (r.id === updatedRecord.id ? updatedRecord : r))
+          : null
+      );
+
+      setConfirmation(null);
+      setCorrectingRecordId(null);
+    } catch (error) {
+      setCorrectionError(attendanceErrorMessage(error));
+      setCorrectingRecordId(null);
+    }
+  }
+
+  function handleCancelCorrection() {
+    setConfirmation(null);
+    setCorrectionError(null);
   }
 
   const catalogLoading = catalogs === null && catalogError === null;
@@ -774,6 +872,145 @@ export function AdminAttendancePage() {
                 <span className="app-detail__label">Created at: </span>
                 {formatDateTime(detail.createdAt)}
               </p>
+
+              <hr className="admin-detail__divider" />
+
+              <h3 className="admin-detail__subsection">Attendance Records</h3>
+              {recordsLoading ? (
+                <p className="inline-status" aria-busy>
+                  Loading attendance records…
+                </p>
+              ) : recordsError !== null ? (
+                <div className="resource-error">
+                  <p role="alert" className="form-error">
+                    {recordsError}
+                  </p>
+                  <button
+                    type="button"
+                    className="secondary-button"
+                    onClick={() => {
+                      if (selectedId) {
+                        setRecordsLoading(true);
+                        setRecordsError(null);
+                        listAdminAttendanceRecords(selectedId)
+                          .then((res) => setRecords(res.data))
+                          .catch((error: unknown) => setRecordsError(attendanceErrorMessage(error)))
+                          .finally(() => setRecordsLoading(false));
+                      }
+                    }}
+                  >
+                    Retry
+                  </button>
+                </div>
+              ) : records === null || records.length === 0 ? (
+                <p className="inline-status">
+                  No attendance records found for this session.
+                </p>
+              ) : (
+                <div className="admin-table-scroll">
+                  <table className="admin-table">
+                    <thead>
+                      <tr>
+                        <th scope="col">Student</th>
+                        <th scope="col">Matric No.</th>
+                        <th scope="col">Status</th>
+                        <th scope="col">Marked At</th>
+                        <th scope="col">Correction</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {records.map((record) => (
+                        <tr key={record.id} className="admin-table__row">
+                          <td>
+                            <span className="admin-table__primary">
+                              {record.studentName}
+                            </span>
+                          </td>
+                          <td>{record.matricNumber}</td>
+                          <td>
+                            <span
+                              className={
+                                record.status === "PRESENT"
+                                  ? "attendance-state attendance-state--present"
+                                  : "attendance-state attendance-state--late"
+                              }
+                            >
+                              {record.status}
+                            </span>
+                          </td>
+                          <td>{formatDateTime(record.markedAt)}</td>
+                          <td>
+                            {confirmation?.recordId === record.id ? (
+                              <div className="correction-confirm">
+                                <p className="correction-confirm__text">
+                                  Change status for <strong>{confirmation.studentName}</strong> in{" "}
+                                  <strong>{confirmation.courseCode}</strong> to{" "}
+                                  <strong>{confirmation.newStatus}</strong>?
+                                </p>
+                                {correctionError && (
+                                  <p className="form-error correction-confirm__error">
+                                    {correctionError}
+                                  </p>
+                                )}
+                                <div className="correction-confirm__actions">
+                                  <button
+                                    type="button"
+                                    className="auth-submit"
+                                    disabled={correctingRecordId !== null}
+                                    aria-busy={correctingRecordId === record.id}
+                                    onClick={handleConfirmCorrection}
+                                  >
+                                    {correctingRecordId === record.id
+                                      ? "Submitting…"
+                                      : "Confirm"}
+                                  </button>
+                                  <button
+                                    type="button"
+                                    className="secondary-button"
+                                    onClick={handleCancelCorrection}
+                                    disabled={correctingRecordId !== null}
+                                  >
+                                    Cancel
+                                  </button>
+                                </div>
+                              </div>
+                            ) : (
+                              <div className="correction-actions">
+                                <button
+                                  type="button"
+                                  className="secondary-button"
+                                  onClick={() => handleCorrect(record, "PRESENT")}
+                                  disabled={
+                                    record.status === "PRESENT" ||
+                                    correctingRecordId !== null ||
+                                    correctionError !== null ||
+                                    confirmation !== null
+                                  }
+                                >
+                                  PRESENT
+                                </button>
+                                <button
+                                  type="button"
+                                  className="secondary-button"
+                                  onClick={() => handleCorrect(record, "LATE")}
+                                  disabled={
+                                    record.status === "LATE" ||
+                                    correctingRecordId !== null ||
+                                    correctionError !== null ||
+                                    confirmation !== null
+                                  }
+                                >
+                                  LATE
+                                </button>
+                              </div>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
             </div>
           ) : null}
         </section>
