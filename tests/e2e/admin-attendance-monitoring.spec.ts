@@ -2,12 +2,25 @@ import { expect, test } from "@playwright/test";
 import type { Locator, Page } from "@playwright/test";
 import { E2E_ADMIN, E2E_STUDENT } from "./constants";
 import { withLoginMutex } from "./helpers/login-mutex";
+import {
+  acquireAttendanceFixturesLock,
+} from "./helpers/attendance-fixture-mutex";
 
 test.describe.configure({ mode: "serial" });
 
 const MONITOR_STAFF_ID = "E2E/LEC/0002";
 const MONITOR_NAME = "E2E Monitor Lecturer";
 const OTHER_LECTURER_NAME = "E2E Lecturer";
+
+let releaseAttendanceLock: (() => Promise<void>) | undefined;
+
+test.beforeAll(async () => {
+  releaseAttendanceLock = await acquireAttendanceFixturesLock();
+});
+
+test.afterAll(async () => {
+  await releaseAttendanceLock?.();
+});
 
 async function loginAsAdmin(page: Page): Promise<void> {
   await withLoginMutex("admin", async () => {

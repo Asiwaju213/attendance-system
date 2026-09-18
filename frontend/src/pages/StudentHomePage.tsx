@@ -7,6 +7,12 @@ export function StudentHomePage() {
       <Link className="auth-submit home-link" to="/app/student/attendance">
         Mark attendance
       </Link>
+      <Link
+        className="auth-submit home-link"
+        to="/app/student/attendance-history"
+      >
+        Attendance history
+      </Link>
     </PlaceholderHome>
   );
 }

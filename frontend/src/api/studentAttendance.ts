@@ -2,6 +2,7 @@ import { apiRequest } from "./client";
 import type {
   EligibleAttendanceSession,
   MarkedAttendance,
+  StudentAttendanceHistory,
 } from "../types/attendance";
 import type {
   AuthenticationResponseJSON,
@@ -28,4 +29,10 @@ export function markSessionAttendance(
     method: "POST",
     body: { attendanceSessionId, assertion },
   });
+}
+
+export function getStudentAttendanceHistory(): Promise<{
+  data: StudentAttendanceHistory;
+}> {
+  return apiRequest("/student/attendance/history");
 }

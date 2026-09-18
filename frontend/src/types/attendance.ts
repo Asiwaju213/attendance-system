@@ -171,3 +171,39 @@ export interface CourseOfferingAttendanceReport {
   courseOffering: CourseOfferingReportContext;
   students: CourseOfferingStudentAttendance[];
 }
+
+export type StudentHistoryAttendanceStatus = "PRESENT" | "LATE" | "ABSENT";
+
+export interface StudentCourseHistorySession {
+  sessionId: number;
+  startTime: string;
+  endTime: string;
+  lecturerName: string;
+  locationName: string;
+  attendanceNetworkName: string;
+  status: StudentHistoryAttendanceStatus;
+  markedAt: string | null;
+}
+
+export interface StudentCourseHistorySummary {
+  completedSessions: number;
+  presentCount: number;
+  lateCount: number;
+  absentCount: number;
+  attendancePercentage: number | null;
+}
+
+export interface StudentCourseHistory {
+  courseOfferingId: number;
+  courseCode: string;
+  courseTitle: string;
+  academicSession: string;
+  semester: string;
+  level: number;
+  summary: StudentCourseHistorySummary;
+  sessions: StudentCourseHistorySession[];
+}
+
+export interface StudentAttendanceHistory {
+  courses: StudentCourseHistory[];
+}

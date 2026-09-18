@@ -17,6 +17,7 @@ import { NotFoundPage } from "../pages/NotFoundPage";
 import { StaffLoginPage } from "../pages/StaffLoginPage";
 import { StudentHomePage } from "../pages/StudentHomePage";
 import { StudentAttendancePage } from "../pages/StudentAttendancePage";
+import { StudentAttendanceHistoryPage } from "../pages/StudentAttendanceHistoryPage";
 import { StudentLoginPage } from "../pages/StudentLoginPage";
 import { StudentRegisterPage } from "../pages/StudentRegisterPage";
 
@@ -114,6 +115,14 @@ export function AppRoutes() {
           element={
             <ProtectedRoute role="STUDENT">
               <StudentAttendancePage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/app/student/attendance-history"
+          element={
+            <ProtectedRoute role="STUDENT">
+              <StudentAttendanceHistoryPage />
             </ProtectedRoute>
           }
         />
