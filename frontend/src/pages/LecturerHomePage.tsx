@@ -7,6 +7,9 @@ export function LecturerHomePage() {
       <Link to="/app/lecturer/attendance" className="auth-submit home-link">
         Manage attendance sessions
       </Link>
+      <Link to="/app/lecturer/attendance-reports" className="auth-submit home-link">
+        View attendance reports
+      </Link>
     </PlaceholderHome>
   );
 }

@@ -3,7 +3,7 @@ import type { Page } from "@playwright/test";
 import { E2E_ADMIN, E2E_LECTURER, E2E_STUDENT } from "./constants";
 import { withLoginMutex } from "./helpers/login-mutex";
 import {
-  acquireAttendanceFixturesLock,
+  acquireAdminReportsFixturesLock,
 } from "./helpers/attendance-fixture-mutex";
 
 test.describe.configure({ mode: "serial" });
@@ -176,10 +176,18 @@ test("an admin can open the page from Admin Home and sees a course offering sele
 test("selecting E2E-101 loads its report context and enrolled student row from the backend", async ({
   page,
 }) => {
-  const releaseLock = await acquireAttendanceFixturesLock();
+  const releaseLock = await acquireAdminReportsFixturesLock();
   try {
     await openReportsPage(page);
     await selectOffering(page, OPEN_OFFERING_PATTERN);
+
+    // Wait for the report API response before asserting UI state so the test
+    // is deterministic under concurrent worker load.
+    await page.waitForResponse(
+      (response) =>
+        response.url().includes("/api/admin/attendance-reports/course-offering") &&
+        response.status() === 200
+    );
 
     const report = reportSection(page);
     await expect(report.getByText("E2E-101 — E2E Computer Science 101")).toBeVisible();
@@ -204,10 +212,18 @@ test("selecting E2E-101 loads its report context and enrolled student row from t
 test("selecting E2E-101 shows the correct attendance counts from the backend", async ({
   page,
 }) => {
-  const releaseLock = await acquireAttendanceFixturesLock();
+  const releaseLock = await acquireAdminReportsFixturesLock();
   try {
     await openReportsPage(page);
     await selectOffering(page, OPEN_OFFERING_PATTERN);
+
+    // Wait for the report API response before asserting UI state so the test
+    // is deterministic under concurrent worker load.
+    await page.waitForResponse(
+      (response) =>
+        response.url().includes("/api/admin/attendance-reports/course-offering") &&
+        response.status() === 200
+    );
 
     const studentRow = page
       .locator(".admin-table__row")

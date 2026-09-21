@@ -2,7 +2,7 @@ import { expect, test } from "@playwright/test";
 import type { Page } from "@playwright/test";
 import { E2E_LECTURER, E2E_STUDENT } from "./constants";
 import {
-  acquireAttendanceFixturesLock,
+  acquireStudentHistoryFixturesLock,
 } from "./helpers/attendance-fixture-mutex";
 import { withLoginMutex } from "./helpers/login-mutex";
 
@@ -211,7 +211,7 @@ test("the loading state is displayed while the history request is pending", asyn
 test("a real authenticated student sees the real attendance history from the backend", async ({
   page,
 }) => {
-  const releaseLock = await acquireAttendanceFixturesLock();
+  const releaseLock = await acquireStudentHistoryFixturesLock();
   try {
     await loginAsStudent(page);
 

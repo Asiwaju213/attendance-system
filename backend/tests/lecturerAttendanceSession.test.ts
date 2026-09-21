@@ -859,7 +859,9 @@ test("different lecturers can each have an active session", async () => {
   assert.equal(create2.status, 201);
 
   const result = await pool.query(
-    `SELECT count(*)::int AS n FROM attendance_sessions WHERE status = 'ACTIVE'`
+    `SELECT count(*)::int AS n FROM attendance_sessions
+     WHERE status = 'ACTIVE' AND started_by_lecturer_id = ANY($1)`,
+    [[lecturer1ProfileId, lecturer2ProfileId]]
   );
   assert.equal(result.rows[0].n, 2);
 });

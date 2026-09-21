@@ -10,7 +10,9 @@ import type {
   CorrectAttendanceRecordInput,
   CorrectAttendanceRecordResponse,
   CourseOfferingAttendanceReport,
+  LecturerAttendanceReport,
   LecturerCourseOffering,
+  LecturerSessionAttendanceReport,
 } from "../types/attendance";
 
 export interface CreateAttendanceSessionInput {
@@ -88,6 +90,22 @@ export function getCourseOfferingAttendanceReport(
 ): Promise<{ data: CourseOfferingAttendanceReport }> {
   return apiRequest(
     `/admin/attendance-reports/course-offering/${courseOfferingId}`
+  );
+}
+
+export function getLecturerCourseOfferingReport(
+  courseOfferingId: number
+): Promise<{ data: LecturerAttendanceReport }> {
+  return apiRequest(
+    `/lecturer/attendance-reports/course-offering/${courseOfferingId}`
+  );
+}
+
+export function getLecturerSessionAttendanceReport(
+  attendanceSessionId: number
+): Promise<{ data: LecturerSessionAttendanceReport }> {
+  return apiRequest(
+    `/lecturer/attendance-reports/session/${attendanceSessionId}`
   );
 }
 

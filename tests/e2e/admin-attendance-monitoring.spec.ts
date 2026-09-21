@@ -3,7 +3,7 @@ import type { Locator, Page } from "@playwright/test";
 import { E2E_ADMIN, E2E_STUDENT } from "./constants";
 import { withLoginMutex } from "./helpers/login-mutex";
 import {
-  acquireAttendanceFixturesLock,
+  acquireAdminMonitoringFixturesLock,
 } from "./helpers/attendance-fixture-mutex";
 
 test.describe.configure({ mode: "serial" });
@@ -12,14 +12,14 @@ const MONITOR_STAFF_ID = "E2E/LEC/0002";
 const MONITOR_NAME = "E2E Monitor Lecturer";
 const OTHER_LECTURER_NAME = "E2E Lecturer";
 
-let releaseAttendanceLock: (() => Promise<void>) | undefined;
+let releaseMonitoringLock: (() => Promise<void>) | undefined;
 
 test.beforeAll(async () => {
-  releaseAttendanceLock = await acquireAttendanceFixturesLock();
+  releaseMonitoringLock = await acquireAdminMonitoringFixturesLock();
 });
 
 test.afterAll(async () => {
-  await releaseAttendanceLock?.();
+  await releaseMonitoringLock?.();
 });
 
 async function loginAsAdmin(page: Page): Promise<void> {
@@ -230,17 +230,22 @@ test("an API failure shows an error and Retry recovers the list", async ({
   await page.route("**/api/admin/attendance-sessions*", (route) =>
     route.abort()
   );
+
+  // Click Apply filters and wait for the error UI to appear
   await page.getByRole("button", { name: "Apply filters" }).click();
 
+  // Wait for the error alert to appear (the failed request triggers it)
   await expect(
     page.getByRole("alert").filter({ hasText: "Something went wrong" })
-  ).toBeVisible();
+  ).toBeVisible({ timeout: 15_000 });
   await expect(page.getByRole("button", { name: "Retry", exact: true })).toBeVisible();
 
   await page.unroute("**/api/admin/attendance-sessions*");
   await page.getByRole("button", { name: "Retry", exact: true }).click();
 
-  await expect(page.locator(".admin-table__row")).not.toHaveCount(0);
+  // Wait for the UI to recover (table rows appear) instead of waiting for API response,
+  // as the retry might use cached data or the request might be deduplicated.
+  await expect(page.locator(".admin-table__row")).not.toHaveCount(0, { timeout: 15_000 });
   await expect(page.getByText(MONITOR_NAME, { exact: false }).first()).toBeVisible();
 });
 

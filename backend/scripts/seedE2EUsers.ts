@@ -18,6 +18,22 @@ const E2E_LOCATION_NAME = "E2E Test Lecture Hall";
 const E2E_ACADEMIC_SESSION_NAME = "E2E-2026/2027";
 const E2E_COURSE_CODE = "E2E-101";
 const E2E_COURSE_TITLE = "E2E Computer Science 101";
+const E2E_COURSE_CODE_TWO = "E2E-102";
+const E2E_COURSE_TITLE_TWO = "E2E Computer Science 102";
+const E2E_COURSE_CODE_THREE = "E2E-103";
+const E2E_COURSE_TITLE_THREE = "E2E Computer Science 103";
+
+const E2E_STUDENT_MATRICS = [
+  "E2E/STU/0001",
+  "E2E/STU/0002",
+  "E2E/STU/0003",
+] as const;
+
+const E2E_COURSE_CODES = [
+  E2E_COURSE_CODE,
+  E2E_COURSE_CODE_TWO,
+  E2E_COURSE_CODE_THREE,
+] as const;
 
 interface E2EUser {
   name: string;
@@ -33,6 +49,20 @@ const E2E_USERS: E2EUser[] = [
     role: "STUDENT",
     username: null,
     matricNumber: E2E_STUDENT_MATRIC,
+    staffId: null,
+  },
+  {
+    name: "E2E Student Two",
+    role: "STUDENT",
+    username: null,
+    matricNumber: "E2E/STU/0002",
+    staffId: null,
+  },
+  {
+    name: "E2E Student Three",
+    role: "STUDENT",
+    username: null,
+    matricNumber: "E2E/STU/0003",
     staffId: null,
   },
   {
@@ -71,11 +101,11 @@ async function findE2EUserIds(): Promise<number[]> {
        FROM users u
        LEFT JOIN students s ON s.user_id = u.id
        LEFT JOIN lecturers l ON l.user_id = u.id
-      WHERE s.matric_number = $1
+      WHERE s.matric_number = ANY($1::TEXT[])
          OR l.staff_id = ANY($2::TEXT[])
          OR u.username = $3`,
     [
-      E2E_STUDENT_MATRIC,
+      E2E_STUDENT_MATRICS,
       [
         E2E_LECTURER_STAFF_ID,
         E2E_MONITOR_LECTURER_STAFF_ID,
@@ -135,24 +165,27 @@ async function cleanup(): Promise<void> {
       `DELETE FROM course_offering_lecturers
        WHERE course_offering_id IN (
          SELECT id FROM course_offerings
-         WHERE course_id IN (SELECT id FROM courses WHERE course_code = $1)
+         WHERE course_id IN (SELECT id FROM courses WHERE course_code = ANY($1::TEXT[]))
        )`,
-      [E2E_COURSE_CODE]
+      [E2E_COURSE_CODES]
     );
     await pool.query(
       `DELETE FROM course_registrations
        WHERE course_offering_id IN (
          SELECT id FROM course_offerings
-         WHERE course_id IN (SELECT id FROM courses WHERE course_code = $1)
+         WHERE course_id IN (SELECT id FROM courses WHERE course_code = ANY($1::TEXT[]))
        )`,
-      [E2E_COURSE_CODE]
+      [E2E_COURSE_CODES]
     );
     await pool.query(
       `DELETE FROM course_offerings
-       WHERE course_id IN (SELECT id FROM courses WHERE course_code = $1)`,
-      [E2E_COURSE_CODE]
+       WHERE course_id IN (SELECT id FROM courses WHERE course_code = ANY($1::TEXT[]))`,
+      [E2E_COURSE_CODES]
     );
-    await pool.query(`DELETE FROM courses WHERE course_code = $1`, [E2E_COURSE_CODE]);
+    await pool.query(
+      `DELETE FROM courses WHERE course_code = ANY($1::TEXT[])`,
+      [E2E_COURSE_CODES]
+    );
     await pool.query(`DELETE FROM academic_sessions WHERE name = $1`, [
       E2E_ACADEMIC_SESSION_NAME,
     ]);
@@ -202,7 +235,7 @@ async function seed(): Promise<void> {
   const passwordHash = await hashPassword(E2E_PASSWORD);
 
   const lecturerProfileIds = new Map<string, number>();
-  let studentProfileId: number | null = null;
+  const studentProfileIds = new Map<string, number>();
 
   for (const user of E2E_USERS) {
     const inserted = await pool.query(
@@ -220,7 +253,7 @@ async function seed(): Promise<void> {
          RETURNING id`,
         [userId, user.matricNumber, departmentId, levelId]
       );
-      studentProfileId = Number(student.rows[0].id);
+      studentProfileIds.set(user.matricNumber, Number(student.rows[0].id));
     } else if (user.role === "LECTURER" && user.staffId !== null) {
       const lecturer = await pool.query(
         `INSERT INTO lecturers (user_id, staff_id, department_id)
@@ -373,7 +406,49 @@ async function seed(): Promise<void> {
     [openOfferingId, studentMarkLecturerProfileId]
   );
 
-  if (studentProfileId === null) {
+  // A second, open course offering assigned only to the monitor lecturer. It
+  // has no registrations or sessions, and gives the lecturer reports spec a
+  // cross-lecturer isolation pair: only the monitor lecturer's selector should
+  // ever list it, and E2E/LEC/0001 must get OFFERING_NOT_FOUND for it.
+  await pool.query(
+    `INSERT INTO courses (course_code, title, department_id, level_id)
+     VALUES ($1, $2, $3, $4)
+     ON CONFLICT (course_code) DO NOTHING`,
+    [E2E_COURSE_CODE_TWO, E2E_COURSE_TITLE_TWO, departmentId, levelId]
+  );
+  const courseTwoId = Number(
+    (
+      await pool.query(`SELECT id FROM courses WHERE course_code = $1`, [
+        E2E_COURSE_CODE_TWO,
+      ])
+    ).rows[0].id
+  );
+
+  await pool.query(
+    `INSERT INTO course_offerings (course_id, academic_session_id, semester_id)
+     VALUES ($1, $2, $3)
+     ON CONFLICT (course_id, academic_session_id, semester_id) DO NOTHING`,
+    [courseTwoId, academicSessionId, firstSemesterId]
+  );
+  const openOfferingTwoId = Number(
+    (
+      await pool.query(
+        `SELECT id FROM course_offerings
+         WHERE course_id = $1 AND academic_session_id = $2 AND semester_id = $3`,
+        [courseTwoId, academicSessionId, firstSemesterId]
+      )
+    ).rows[0].id
+  );
+
+  await pool.query(
+    `INSERT INTO course_offering_lecturers (course_offering_id, lecturer_id)
+     VALUES ($1, $2)
+     ON CONFLICT (course_offering_id, lecturer_id) DO NOTHING`,
+    [openOfferingTwoId, monitorLecturerProfileId]
+  );
+
+  const studentProfileId = studentProfileIds.get(E2E_STUDENT_MATRIC);
+  if (studentProfileId === undefined) {
     throw new Error("E2E student profile was not created.");
   }
   await pool.query(
@@ -381,6 +456,92 @@ async function seed(): Promise<void> {
      VALUES ($1, $2, 'ENROLLED')
      ON CONFLICT (student_id, course_offering_id) DO NOTHING`,
     [studentProfileId, openOfferingId]
+  );
+
+  // A third, open course offering assigned only to the main lecturer, with
+  // three enrolled students and one ENDED session that shows PRESENT, LATE and
+  // ABSENT together. The lecturer session-attendance-report spec reads this
+  // session through the main lecturer's own session list, and every assertion
+  // in the admin monitoring/report specs stays valid because none of this
+  // offering's data touches E2E-101 (its roster and completed-session counts
+  // are unchanged) and none of its sessions are started by the monitor.
+  await pool.query(
+    `INSERT INTO courses (course_code, title, department_id, level_id)
+     VALUES ($1, $2, $3, $4)
+     ON CONFLICT (course_code) DO NOTHING`,
+    [E2E_COURSE_CODE_THREE, E2E_COURSE_TITLE_THREE, departmentId, levelId]
+  );
+  const courseThreeId = Number(
+    (
+      await pool.query(`SELECT id FROM courses WHERE course_code = $1`, [
+        E2E_COURSE_CODE_THREE,
+      ])
+    ).rows[0].id
+  );
+
+  await pool.query(
+    `INSERT INTO course_offerings (course_id, academic_session_id, semester_id)
+     VALUES ($1, $2, $3)
+     ON CONFLICT (course_id, academic_session_id, semester_id) DO NOTHING`,
+    [courseThreeId, academicSessionId, firstSemesterId]
+  );
+  const openOfferingThreeId = Number(
+    (
+      await pool.query(
+        `SELECT id FROM course_offerings
+         WHERE course_id = $1 AND academic_session_id = $2 AND semester_id = $3`,
+        [courseThreeId, academicSessionId, firstSemesterId]
+      )
+    ).rows[0].id
+  );
+
+  await pool.query(
+    `INSERT INTO course_offering_lecturers (course_offering_id, lecturer_id)
+     VALUES ($1, $2)
+     ON CONFLICT (course_offering_id, lecturer_id) DO NOTHING`,
+    [openOfferingThreeId, lecturerProfileId]
+  );
+
+  for (const matric of E2E_STUDENT_MATRICS) {
+    const studentId = studentProfileIds.get(matric);
+    if (studentId === undefined) {
+      throw new Error(`E2E student profile for ${matric} was not created.`);
+    }
+    await pool.query(
+      `INSERT INTO course_registrations (student_id, course_offering_id, status)
+       VALUES ($1, $2, 'ENROLLED')
+       ON CONFLICT (student_id, course_offering_id) DO NOTHING`,
+      [studentId, openOfferingThreeId]
+    );
+  }
+
+  const sessionThreeRes = await pool.query(
+    `INSERT INTO attendance_sessions
+       (course_offering_id, started_by_lecturer_id, attendance_network_id,
+        location_id, start_time, end_time, late_threshold, status, created_at, ended_at)
+     VALUES
+       ($1, $2, $3, $4,
+        now() - interval '3 days', now() - interval '3 days' + interval '60 minutes',
+        interval '5 minutes', 'ENDED', now() - interval '3 days',
+        now() - interval '3 days' + interval '60 minutes')
+     RETURNING id`,
+    [openOfferingThreeId, lecturerProfileId, networkId, locationId]
+  );
+  const sessionThreeId = Number(sessionThreeRes.rows[0].id);
+
+  const presentStudentId = studentProfileIds.get(E2E_STUDENT_MATRIC);
+  const lateStudentId = studentProfileIds.get("E2E/STU/0002");
+  if (presentStudentId === undefined || lateStudentId === undefined) {
+    throw new Error("E2E student profiles for the session report were not created.");
+  }
+  // E2E/STU/0001 PRESENT, E2E/STU/0002 LATE; E2E/STU/0003 has no record and
+  // therefore reads as ABSENT in the report.
+  await pool.query(
+    `INSERT INTO attendance_records (session_id, student_id, status, marked_at)
+     VALUES ($1, $2, 'PRESENT', now() - interval '3 days' + interval '10 minutes'),
+            ($3, $4, 'LATE', now() - interval '3 days' + interval '25 minutes')
+     ON CONFLICT (session_id, student_id) DO NOTHING`,
+    [sessionThreeId, presentStudentId, sessionThreeId, lateStudentId]
   );
 
   await pool.query(

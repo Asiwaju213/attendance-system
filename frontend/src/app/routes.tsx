@@ -11,6 +11,8 @@ import { AdminAttendanceReportsPage } from "../pages/AdminAttendanceReportsPage"
 import { AdminAcademicPeriodsPage } from "../pages/AdminAcademicPeriodsPage";
 import { LecturerHomePage } from "../pages/LecturerHomePage";
 import { LecturerAttendancePage } from "../pages/LecturerAttendancePage";
+import { LecturerAttendanceReportsPage } from "../pages/LecturerAttendanceReportsPage";
+import { LecturerSessionAttendanceReportPage } from "../pages/LecturerSessionAttendanceReportPage";
 import { LecturerLoginPage } from "../pages/LecturerLoginPage";
 import { NetworkTestPage } from "../pages/NetworkTestPage";
 import { NotFoundPage } from "../pages/NotFoundPage";
@@ -139,6 +141,22 @@ export function AppRoutes() {
           element={
             <ProtectedRoute role="LECTURER">
               <LecturerAttendancePage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/app/lecturer/attendance-reports"
+          element={
+            <ProtectedRoute role="LECTURER">
+              <LecturerAttendanceReportsPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/app/lecturer/attendance-reports/session/:attendanceSessionId"
+          element={
+            <ProtectedRoute role="LECTURER">
+              <LecturerSessionAttendanceReportPage />
             </ProtectedRoute>
           }
         />

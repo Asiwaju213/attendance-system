@@ -2,20 +2,20 @@ import { expect, test } from "@playwright/test";
 import type { Locator, Page } from "@playwright/test";
 import { E2E_LECTURER, E2E_STUDENT } from "./constants";
 import {
-  acquireAttendanceFixturesLock,
+  acquireLecturerStudentFixturesLock,
 } from "./helpers/attendance-fixture-mutex";
 import { withLoginMutex } from "./helpers/login-mutex";
 
 test.describe.configure({ mode: "serial" });
 
-let releaseAttendanceLock: (() => Promise<void>) | undefined;
+let releaseLecturerStudentLock: (() => Promise<void>) | undefined;
 
 test.beforeAll(async () => {
-  releaseAttendanceLock = await acquireAttendanceFixturesLock();
+  releaseLecturerStudentLock = await acquireLecturerStudentFixturesLock();
 });
 
 test.afterAll(async () => {
-  await releaseAttendanceLock?.();
+  await releaseLecturerStudentLock?.();
 });
 
 const OFFERING_OPTION = /E2E-101/;

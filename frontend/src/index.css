@@ -631,6 +631,36 @@ body {
   background: color-mix(in srgb, var(--color-text-muted) 12%, transparent);
 }
 
+.student-report {
+  margin: 0 0 16px;
+  padding: 12px 14px;
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+}
+
+.student-report__header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 4px 12px;
+  margin-bottom: 10px;
+}
+
+.student-report__name {
+  margin: 0;
+  font-weight: 600;
+}
+
+.student-sessions {
+  margin-top: 6px;
+}
+
+.student-sessions__summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+
 .admin-filter-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));

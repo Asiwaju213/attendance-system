@@ -802,6 +802,14 @@ export function LecturerAttendancePage() {
                     : ""}{" "}
                   · {historyStateLabel(session)}
                 </p>
+                {session.currentState === "ENDED" ? (
+                  <Link
+                    className="secondary-button"
+                    to={`/app/lecturer/attendance-reports/session/${session.id}`}
+                  >
+                    View Attendance
+                  </Link>
+                ) : null}
               </li>
             ))}
           </ul>

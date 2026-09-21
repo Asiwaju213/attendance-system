@@ -11,8 +11,10 @@ import adminLocationsRouter from "./routes/adminLocations";
 import adminOrganizationRouter from "./routes/adminOrganization";
 import adminSemestersRouter from "./routes/adminSemesters";
 import adminStudentImportRouter from "./routes/adminStudentImport";
+import adminStudentDevicesRouter from "./routes/adminStudentDevices";
 import authRouter from "./routes/auth";
 import debugNetworkRouter from "./routes/debugNetwork";
+import lecturerAttendanceReportsRouter from "./routes/lecturerAttendanceReports";
 import lecturerAttendanceSessionsRouter from "./routes/lecturerAttendanceSessions";
 import lecturerCatalogRouter from "./routes/lecturerCatalog";
 import studentAttendanceHistoryRouter from "./routes/studentAttendanceHistory";
@@ -51,6 +53,7 @@ app.use("/api/admin", adminOrganizationRouter);
 app.use("/api/admin", adminCoursesRouter);
 app.use("/api/admin", adminCourseOfferingsRouter);
 app.use("/api/admin", adminStudentImportRouter);
+app.use("/api/admin", adminStudentDevicesRouter);
 app.use("/api/admin", adminAttendanceNetworksRouter);
 app.use("/api/admin", adminAttendanceSessionsRouter);
 app.use("/api/admin", adminAttendanceRecordsRouter);
@@ -62,6 +65,7 @@ app.use("/api/student", studentAttendanceHistoryRouter);
 app.use("/api/student", studentAttendanceRouter);
 app.use("/api/lecturer", lecturerCatalogRouter);
 app.use("/api/lecturer", lecturerAttendanceSessionsRouter);
+app.use("/api/lecturer", lecturerAttendanceReportsRouter);
 
 // TEMPORARY: network investigation endpoint (unauthenticated, read-only).
 // Remove this mount and `routes/debugNetwork.ts` once the investigation ends.
