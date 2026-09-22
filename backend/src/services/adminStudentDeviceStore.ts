@@ -48,6 +48,16 @@ export async function listAdminStudentDevices(
     paramIndex++;
   }
 
+  // Filter on the student's most recent device state. `d` is the lateral alias
+  // holding exactly one row per student (their latest device, or null).
+  if (filters?.status === "ACTIVE") {
+    conditions.push(`d.status = 'ACTIVE'`);
+  } else if (filters?.status === "REVOKED") {
+    conditions.push(`d.status = 'REVOKED'`);
+  } else if (filters?.status === "NO_DEVICE") {
+    conditions.push(`d.id IS NULL`);
+  }
+
   const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
 
   const query = `
@@ -236,7 +246,7 @@ export async function resetStudentDevice(
       [
         adminUserId,
         activeDevice.id,
-        `Admin reset device for student ${student.matric_number} (${student.name}); previous device ${activeDevice.credential_id} revoked`,
+        `Admin reset the active device for student ${student.matric_number} (${student.name}); previous status ${previousStatus}`,
       ]
     );
 

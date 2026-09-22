@@ -21,7 +21,7 @@ export function parseAdminDeviceListFilters(
 
   const matricNumber = typeof obj.matricNumber === "string" ? obj.matricNumber.trim() : undefined;
   const studentName = typeof obj.studentName === "string" ? obj.studentName.trim() : undefined;
-  const status = obj.status;
+  const status = typeof obj.status === "string" ? obj.status : undefined;
 
   if (matricNumber && matricNumber.length > 100) {
     return null;

@@ -11,7 +11,10 @@ export function AdminHomePage() {
         Attendance Reports
       </Link>
       <Link to="/app/admin/academic-periods" className="auth-submit home-link">
-        Academic Sessions &amp; Semesters
+        Academic Sessions & Semesters
+      </Link>
+      <Link to="/app/admin/student-devices" className="auth-submit home-link">
+        Student Device Administration
       </Link>
     </PlaceholderHome>
   );

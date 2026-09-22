@@ -13,6 +13,12 @@ export function StudentHomePage() {
       >
         Attendance history
       </Link>
+      <Link
+        className="auth-submit home-link"
+        to="/app/student/device"
+      >
+        Device Enrollment
+      </Link>
     </PlaceholderHome>
   );
 }

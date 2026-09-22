@@ -4,18 +4,44 @@ import {
   getStudentDeviceStatus,
   listAdminStudentDevices,
   resetStudentDevice,
+  type AdminStudentDeviceRow,
+  type AdminStudentDeviceSummary,
 } from "../services/adminStudentDeviceStore";
 import {
   parseAdminDeviceListFilters,
   parseStudentIdParam,
 } from "../validation/adminStudentDeviceValidation";
 
-function firstQueryParam(value: string | string[] | undefined): string | undefined {
-  if (value === undefined) return undefined;
-  return Array.isArray(value) ? value[0] : value;
+const router = Router();
+
+// Serialize the snake_case storage row into the camelCase JSON shape the admin
+// UI consumes. No key material or raw challenges are present on these rows.
+function serializeDevice(device: AdminStudentDeviceRow) {
+  return {
+    id: device.id,
+    studentId: device.student_id,
+    credentialId: device.credential_id,
+    credType: device.cred_type,
+    aaguid: device.aaguid,
+    label: device.label,
+    transports: device.transports,
+    status: device.status,
+    enrolledAt: device.enrolled_at,
+    lastSeenAt: device.last_seen_at,
+    revokedAt: device.revoked_at,
+    counter: device.counter,
+  };
 }
 
-const router = Router();
+function serializeSummary(summary: AdminStudentDeviceSummary) {
+  return {
+    studentId: summary.studentId,
+    studentName: summary.studentName,
+    matricNumber: summary.matricNumber,
+    device: summary.device ? serializeDevice(summary.device) : null,
+    hasActiveDevice: summary.hasActiveDevice,
+  };
+}
 
 router.use(requireAuth, requireAdmin);
 
@@ -47,7 +73,7 @@ router.get("/student-devices", async (req: Request, res: Response) => {
 
   try {
     const devices = await listAdminStudentDevices(filters);
-    res.status(200).json({ data: devices });
+    res.status(200).json({ data: devices.map(serializeSummary) });
   } catch (error) {
     console.error("Admin student devices list error.", (error as Error).message);
     res.status(500).json({
@@ -71,7 +97,7 @@ router.get("/students/:studentId/device", async (req: Request, res: Response) =>
       return;
     }
 
-    res.status(200).json({ data: status });
+    res.status(200).json({ data: serializeSummary(status) });
   } catch (error) {
     console.error("Admin student device status error.", (error as Error).message);
     res.status(500).json({
@@ -102,7 +128,13 @@ router.post("/students/:studentId/device/reset", async (req: Request, res: Respo
       }
     }
 
-    res.status(200).json({ data: result });
+    res.status(200).json({
+      data: {
+        ok: true,
+        device: result.device ? serializeDevice(result.device) : null,
+        previousStatus: result.previousStatus,
+      },
+    });
   } catch (error) {
     console.error("Admin student device reset error.", (error as Error).message);
     res.status(500).json({

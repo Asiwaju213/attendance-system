@@ -6,6 +6,12 @@ export const E2E_STUDENT = {
   name: "E2E Student",
 };
 
+export const E2E_STUDENT_TWO = {
+  matricNumber: "E2E/STU/0002",
+  password: E2E_PASSWORD,
+  name: "E2E Student Two",
+};
+
 export const E2E_LECTURER = {
   staffId: "E2E/LEC/0001",
   password: E2E_PASSWORD,

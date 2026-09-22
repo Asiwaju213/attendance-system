@@ -9,6 +9,7 @@ import { AdminLoginPage } from "../pages/AdminLoginPage";
 import { AdminAttendancePage } from "../pages/AdminAttendancePage";
 import { AdminAttendanceReportsPage } from "../pages/AdminAttendanceReportsPage";
 import { AdminAcademicPeriodsPage } from "../pages/AdminAcademicPeriodsPage";
+import { AdminStudentDevicesPage } from "../pages/AdminStudentDevicesPage";
 import { LecturerHomePage } from "../pages/LecturerHomePage";
 import { LecturerAttendancePage } from "../pages/LecturerAttendancePage";
 import { LecturerAttendanceReportsPage } from "../pages/LecturerAttendanceReportsPage";
@@ -20,6 +21,7 @@ import { StaffLoginPage } from "../pages/StaffLoginPage";
 import { StudentHomePage } from "../pages/StudentHomePage";
 import { StudentAttendancePage } from "../pages/StudentAttendancePage";
 import { StudentAttendanceHistoryPage } from "../pages/StudentAttendanceHistoryPage";
+import { StudentDevicePage } from "../pages/StudentDevicePage";
 import { StudentLoginPage } from "../pages/StudentLoginPage";
 import { StudentRegisterPage } from "../pages/StudentRegisterPage";
 
@@ -129,6 +131,14 @@ export function AppRoutes() {
           }
         />
         <Route
+          path="/app/student/device"
+          element={
+            <ProtectedRoute role="STUDENT">
+              <StudentDevicePage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
           path="/app/lecturer"
           element={
             <ProtectedRoute role="LECTURER">
@@ -189,6 +199,14 @@ export function AppRoutes() {
           element={
             <ProtectedRoute role="ADMIN">
               <AdminAcademicPeriodsPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/app/admin/student-devices"
+          element={
+            <ProtectedRoute role="ADMIN">
+              <AdminStudentDevicesPage />
             </ProtectedRoute>
           }
         />
