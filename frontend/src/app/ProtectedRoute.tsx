@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import { Navigate } from "react-router-dom";
+import { AppShell } from "../components/AppShell";
 import { LoadingPage } from "../components/LoadingPage";
 import { homePathForRole, loginPathForRole } from "./navigation";
 import { useAuth } from "./useAuth";
@@ -25,5 +26,5 @@ export function ProtectedRoute({ role, children }: ProtectedRouteProps) {
     return <Navigate to={homePathForRole(user.role)} replace />;
   }
 
-  return children;
+  return <AppShell>{children}</AppShell>;
 }

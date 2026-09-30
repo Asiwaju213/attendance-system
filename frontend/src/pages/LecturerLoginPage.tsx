@@ -53,13 +53,10 @@ export function LecturerLoginPage() {
   return (
     <AuthShell
       title="Lecturer Login"
+      eyebrow="Lecturer Access"
+      description="Manage attendance sessions and review attendance records."
       subtitle="Sign in with your staff ID to continue."
-      footer={
-        <>
-          <Link to="/staff/login">Back to staff login</Link>
-          <Link to="/login">Student login</Link>
-        </>
-      }
+      footer={<Link to="/staff/login">Back to staff login</Link>}
     >
       <form onSubmit={handleSubmit} noValidate>
         {formError !== null ? <FormError message={formError} /> : null}

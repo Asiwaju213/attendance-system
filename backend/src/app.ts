@@ -7,13 +7,14 @@ import adminAttendanceReportsRouter from "./routes/adminAttendanceReports";
 import adminAttendanceSessionsRouter from "./routes/adminAttendanceSessions";
 import adminCourseOfferingsRouter from "./routes/adminCourseOfferings";
 import adminCoursesRouter from "./routes/adminCourses";
+import adminLecturersRouter from "./routes/adminLecturers";
 import adminLocationsRouter from "./routes/adminLocations";
 import adminOrganizationRouter from "./routes/adminOrganization";
 import adminSemestersRouter from "./routes/adminSemesters";
 import adminStudentImportRouter from "./routes/adminStudentImport";
 import adminStudentDevicesRouter from "./routes/adminStudentDevices";
+import adminStudentsRouter from "./routes/adminStudents";
 import authRouter from "./routes/auth";
-import debugNetworkRouter from "./routes/debugNetwork";
 import lecturerAttendanceReportsRouter from "./routes/lecturerAttendanceReports";
 import lecturerAttendanceSessionsRouter from "./routes/lecturerAttendanceSessions";
 import lecturerCatalogRouter from "./routes/lecturerCatalog";
@@ -51,9 +52,11 @@ app.use("/api/admin", adminAcademicSessionsRouter);
 app.use("/api/admin", adminSemestersRouter);
 app.use("/api/admin", adminOrganizationRouter);
 app.use("/api/admin", adminCoursesRouter);
+app.use("/api/admin", adminLecturersRouter);
 app.use("/api/admin", adminCourseOfferingsRouter);
 app.use("/api/admin", adminStudentImportRouter);
 app.use("/api/admin", adminStudentDevicesRouter);
+app.use("/api/admin", adminStudentsRouter);
 app.use("/api/admin", adminAttendanceNetworksRouter);
 app.use("/api/admin", adminAttendanceSessionsRouter);
 app.use("/api/admin", adminAttendanceRecordsRouter);
@@ -66,10 +69,6 @@ app.use("/api/student", studentAttendanceRouter);
 app.use("/api/lecturer", lecturerCatalogRouter);
 app.use("/api/lecturer", lecturerAttendanceSessionsRouter);
 app.use("/api/lecturer", lecturerAttendanceReportsRouter);
-
-// TEMPORARY: network investigation endpoint (unauthenticated, read-only).
-// Remove this mount and `routes/debugNetwork.ts` once the investigation ends.
-app.use("/api/debug", debugNetworkRouter);
 
 // Centralized error handler: never leak internal details to clients.
 app.use((err: Error, _req: Request, res: Response, _next: NextFunction) => {

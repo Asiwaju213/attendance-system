@@ -1,15 +1,44 @@
+import { execFileSync } from "node:child_process";
 import { promises as fs } from "node:fs";
+import { createRequire } from "node:module";
 import { join } from "node:path";
+import { testEnvironment } from "../test-environment";
 
 const LOCK_DIR = join(__dirname, "..", "..", ".playwright-locks");
 const LOCK_STALE_MS = 5 * 60_000;
 const MAX_ATTEMPTS = 7_200;
+const MAX_TRANSIENT_EPERM_RETRIES = 5;
+const RETRY_DELAY_MS = 25;
+const backendDir = join(__dirname, "..", "..", "..", "backend");
+const backendRequire = createRequire(join(backendDir, "package.json"));
+const tsxCli = backendRequire.resolve("tsx/cli");
 
-async function ensureLockDir(): Promise<void> {
-  try {
-    await fs.mkdir(LOCK_DIR, { recursive: true });
-  } catch {
-    // ignore
+function errorCode(error: unknown): string | undefined {
+  return (error as NodeJS.ErrnoException).code;
+}
+
+async function waitBeforeRetry(): Promise<void> {
+  await new Promise((resolve) =>
+    setTimeout(resolve, RETRY_DELAY_MS + Math.random() * RETRY_DELAY_MS)
+  );
+}
+
+async function withTransientEppermRetry<T>(
+  operation: () => Promise<T>
+): Promise<T> {
+  for (let retry = 0; ; retry++) {
+    try {
+      return await operation();
+    } catch (error: unknown) {
+      if (
+        process.platform !== "win32" ||
+        errorCode(error) !== "EPERM" ||
+        retry >= MAX_TRANSIENT_EPERM_RETRIES
+      ) {
+        throw error;
+      }
+      await waitBeforeRetry();
+    }
   }
 }
 
@@ -19,43 +48,75 @@ async function ensureLockDir(): Promise<void> {
 async function acquireNamedLock(
   lockName: string
 ): Promise<() => Promise<void>> {
-  await ensureLockDir();
+  await fs.mkdir(LOCK_DIR, { recursive: true });
   const lockFile = join(LOCK_DIR, `${lockName}.lock`);
   const token = `${process.pid}-${Date.now()}-${Math.random()}`;
 
   for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
     try {
-      await fs.writeFile(lockFile, token, { flag: "wx" });
+      await withTransientEppermRetry(() =>
+        fs.writeFile(lockFile, token, { flag: "wx" })
+      );
       return async (): Promise<void> => {
         try {
-          const current = await fs.readFile(lockFile, "utf8");
+          const current = await withTransientEppermRetry(() =>
+            fs.readFile(lockFile, "utf8")
+          );
           if (current === token) {
-            await fs.unlink(lockFile);
+            await withTransientEppermRetry(() => fs.unlink(lockFile));
           }
-        } catch {
-          // Lock already released or does not exist.
+        } catch (error: unknown) {
+          if (errorCode(error) !== "ENOENT") {
+            throw error;
+          }
         }
       };
     } catch (error: unknown) {
-      if ((error as NodeJS.ErrnoException).code !== "EEXIST") {
+      if (errorCode(error) !== "EEXIST") {
         throw error;
       }
       try {
-        const stat = await fs.stat(lockFile);
+        const stat = await withTransientEppermRetry(() => fs.stat(lockFile));
         if (Date.now() - stat.mtimeMs > LOCK_STALE_MS) {
-          await fs.unlink(lockFile);
+          await withTransientEppermRetry(() => fs.unlink(lockFile));
           continue;
         }
-      } catch {
-        continue;
+      } catch (statError: unknown) {
+        if (errorCode(statError) === "ENOENT") {
+          continue;
+        }
+        throw statError;
       }
-      await new Promise((resolve) => setTimeout(resolve, 25 + Math.random() * 25));
+      await waitBeforeRetry();
     }
   }
   throw new Error(
     `Could not acquire ${lockName} mutex after ${MAX_ATTEMPTS} attempts. ` +
       `Stale lock files under ${LOCK_DIR} may need manual removal.`
   );
+}
+
+export function resetE2E102Registrations(): void {
+  execFileSync(
+    process.execPath,
+    [
+      tsxCli,
+      join(backendDir, "scripts", "seedE2EUsers.ts"),
+      "--reset-course-registrations=E2E-102",
+    ],
+    {
+      cwd: backendDir,
+      env: testEnvironment(),
+      stdio: "pipe",
+      timeout: 120_000,
+    }
+  );
+}
+
+export async function acquireE2E102RegistrationFixturesLock(): Promise<
+  () => Promise<void>
+> {
+  return acquireNamedLock("e2e-102-registration-fixtures");
 }
 
 /**

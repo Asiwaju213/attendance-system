@@ -27,17 +27,14 @@ test("student login page does not contain a role selector", async ({ page }) => 
   await expect(page.getByRole("option")).toHaveCount(0);
 });
 
-test("student login page links to registration and staff login", async ({
+test("student login page links to registration and not to staff login", async ({
   page,
 }) => {
   await page.goto("/login");
 
   await expect(page.getByRole("link", { name: /register/i })).toBeVisible();
-  const staffLink = page.getByRole("link", { name: "Staff login" });
-  await expect(staffLink).toBeVisible();
-
-  await staffLink.click();
-  await expect(page).toHaveURL(/\/staff\/login$/);
+  await expect(page.getByRole("link", { name: /staff login/i })).toHaveCount(0);
+  await expect(page.getByRole("link", { name: /admin login/i })).toHaveCount(0);
 });
 
 test("staff login page exists at /staff/login", async ({ page }) => {

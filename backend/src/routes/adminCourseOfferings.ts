@@ -1,8 +1,11 @@
 import { Request, Response, Router } from "express";
 import { requireAdmin, requireAuth } from "../middleware/authenticate";
 import {
+  adminEnrollStudent,
+  AdminEnrollmentWriteResult,
   assignLecturer,
   createOffering,
+  getOfferingRegistrations,
   listAssignedLecturers,
   listOfferings,
   OfferingErrorCode,
@@ -12,10 +15,12 @@ import {
   updateOffering,
 } from "../services/courseOfferingStore";
 import {
+  parseAdminEnrollStudent,
   parseAssignLecturer,
   parseCreateOffering,
   parseIdParam,
   parseOfferingListFilters,
+  parseRegistrationListFilters,
   parseUpdateOffering,
 } from "../validation/adminCourseOfferingValidation";
 
@@ -94,6 +99,81 @@ function sendErrorCode(res: Response, code: OfferingErrorCode): void {
       res
         .status(400)
         .json({ error: "NOT_A_LECTURER", message: "The referenced user is not a lecturer." });
+      return;
+    case "INVALID_STATUS":
+      res.status(400).json({ error: "INVALID_STATUS", message: "Invalid registration status." });
+      return;
+    case "INVALID_PAGINATION":
+      res.status(400).json({ error: "INVALID_PAGINATION", message: "Invalid pagination parameters." });
+      return;
+    case "STUDENT_NOT_FOUND":
+      res.status(404).json({ error: "STUDENT_NOT_FOUND", message: "The student does not exist." });
+      return;
+    case "STUDENT_NOT_ACTIVE":
+      res
+        .status(409)
+        .json({ error: "STUDENT_NOT_ACTIVE", message: "An inactive student cannot be enrolled." });
+      return;
+    case "STUDENT_WRONG_LEVEL":
+      res
+        .status(409)
+        .json({
+          error: "STUDENT_WRONG_LEVEL",
+          message: "The student's level does not match the course level.",
+        });
+      return;
+    case "STUDENT_WRONG_FACULTY":
+      res
+        .status(409)
+        .json({
+          error: "STUDENT_WRONG_FACULTY",
+          message: "The student's faculty does not match the course faculty.",
+        });
+      return;
+    case "STUDENT_WRONG_DEPARTMENT":
+      res
+        .status(409)
+        .json({
+          error: "STUDENT_WRONG_DEPARTMENT",
+          message: "The student's department does not match the course department.",
+        });
+      return;
+    case "OFFERING_NOT_OPEN":
+      res
+        .status(409)
+        .json({ error: "OFFERING_NOT_OPEN", message: "Only open offerings accept new enrollments." });
+      return;
+    case "NO_ACTIVE_ACADEMIC_SESSION":
+      res
+        .status(409)
+        .json({
+          error: "NO_ACTIVE_ACADEMIC_SESSION",
+          message: "The offering's academic session is not the active session.",
+        });
+      return;
+    case "ALREADY_ENROLLED":
+      res
+        .status(409)
+        .json({
+          error: "ALREADY_ENROLLED",
+          message: "The student is already enrolled in this offering.",
+        });
+      return;
+    case "ALREADY_DROPPED":
+      res
+        .status(409)
+        .json({
+          error: "ALREADY_DROPPED",
+          message: "The student has a dropped registration for this offering and cannot be re-enrolled.",
+        });
+      return;
+    case "ALREADY_COMPLETED":
+      res
+        .status(409)
+        .json({
+          error: "ALREADY_COMPLETED",
+          message: "The student has a completed registration for this offering and cannot be re-enrolled.",
+        });
       return;
   }
 }
@@ -215,6 +295,64 @@ router.delete(
     }
 
     res.status(204).end();
+  }
+);
+
+router.get(
+  "/course-offerings/:id/registrations",
+  async (req: Request, res: Response) => {
+    const id = parseIdParam(req.params.id);
+    if (!id) {
+      sendInvalidRequest(res, "A valid offering id is required.");
+      return;
+    }
+
+    const filters = parseRegistrationListFilters(req.query);
+    if (filters === null) {
+      sendInvalidRequest(res, "Invalid filter or pagination parameters.");
+      return;
+    }
+
+    const result = await getOfferingRegistrations(id, filters);
+    if (!result.ok) {
+      sendErrorCode(res, result.code);
+      return;
+    }
+
+    res.status(200).json({ data: result.data });
+  }
+);
+
+router.post(
+  "/course-offerings/:id/registrations",
+  async (req: Request, res: Response) => {
+    const id = parseIdParam(req.params.id);
+    if (!id) {
+      sendInvalidRequest(res, "A valid offering id is required.");
+      return;
+    }
+
+    const input = parseAdminEnrollStudent(req.body);
+    if (!input) {
+      sendInvalidRequest(
+        res,
+        "Request body must contain exactly one field: studentId, as a positive integer."
+      );
+      return;
+    }
+
+    const result = await adminEnrollStudent({
+      adminUserId: req.user!.id,
+      offeringId: id,
+      studentId: input.studentId,
+    });
+
+    if (!result.ok) {
+      sendErrorCode(res, result.code);
+      return;
+    }
+
+    res.status(201).json({ data: result.data });
   }
 );
 

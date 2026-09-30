@@ -64,7 +64,10 @@ function CourseSummary({
   course: StudentCourseHistory;
 }) {
   return (
-    <dl className="history-summary" aria-label={`Attendance summary for ${course.courseCode}`}>
+    <dl
+      className="history-summary history-course-summary"
+      aria-label={`Attendance summary for ${course.courseCode}`}
+    >
       <div className="history-summary__item">
         <dt className="history-summary__label">Completed sessions</dt>
         <dd className="history-summary__value">
@@ -184,9 +187,12 @@ export function StudentAttendanceHistoryPage() {
   const loading = courses === null && loadError === null;
 
   return (
-    <main className="app-page">
-      <header className="app-header">
-        <div>
+    <main className="app-page attendance-history-page">
+      <header className="app-header attendance-history-page-header">
+        <div className="attendance-history-page-header__copy">
+          <p className="attendance-history-page-header__eyebrow">
+            Student records
+          </p>
           <h1>Attendance History</h1>
           <p className="app-header__sub">
             Completed sessions and attendance for your enrolled courses.
@@ -207,7 +213,16 @@ export function StudentAttendanceHistoryPage() {
       </header>
 
       {loading ? (
-        <section className="app-card app-card--wide" aria-label="Attendance history">
+        <section
+          className="history-state-card history-state-card--loading"
+          aria-label="Attendance history"
+        >
+          <div className="history-skeleton" aria-hidden="true">
+            <span />
+            <span />
+            <span />
+            <span />
+          </div>
           <p className="inline-status" role="status">
             Loading attendance history…
           </p>
@@ -215,7 +230,11 @@ export function StudentAttendanceHistoryPage() {
       ) : null}
 
       {loadError !== null ? (
-        <section className="app-card app-card--wide" aria-label="Attendance history">
+        <section
+          className="history-state-card history-state-card--error"
+          aria-label="Attendance history"
+        >
+          <p className="history-state-card__title">Unable to load history</p>
           <div className="resource-error">
             <FormError message={loadError} />
             <button
@@ -231,7 +250,11 @@ export function StudentAttendanceHistoryPage() {
       ) : null}
 
       {courses !== null && courses.length === 0 ? (
-        <section className="app-card app-card--wide" aria-label="Attendance history">
+        <section
+          className="history-state-card history-state-card--empty"
+          aria-label="Attendance history"
+        >
+          <p className="history-state-card__title">No history yet</p>
           <p className="inline-status" role="status">
             You have no completed attendance sessions yet.
           </p>
@@ -239,20 +262,28 @@ export function StudentAttendanceHistoryPage() {
       ) : null}
 
       {courses !== null && courses.length > 0 ? (
-        <>
+        <div className="history-course-list">
           {courses.map((course) => {
             const headingId = `history-course-${course.courseOfferingId}`;
             return (
               <section
                 key={course.courseOfferingId}
-                className="app-card app-card--wide"
+                className="app-card app-card--wide history-course-card"
                 aria-labelledby={headingId}
               >
-                <h2 id={headingId}>
-                  {course.courseCode} — {course.courseTitle}
-                </h2>
+                <div className="history-course-card__header">
+                  <h2 id={headingId} className="history-course-card__heading">
+                    <span className="history-course-card__code">
+                      {course.courseCode}
+                    </span>
+                    <span className="history-course-card__divider"> — </span>
+                    <span className="history-course-card__title">
+                      {course.courseTitle}
+                    </span>
+                  </h2>
+                </div>
 
-                <dl className="history-meta">
+                <dl className="history-meta history-course-meta">
                   <div>
                     <dt>Academic session</dt>
                     <dd>{course.academicSession}</dd>
@@ -272,11 +303,14 @@ export function StudentAttendanceHistoryPage() {
                 <h3 className="history-sessions__heading">
                   Sessions ({course.summary.completedSessions})
                 </h3>
-                <ul className="session-list">
+                <ul className="session-list history-session-list">
                   {course.sessions.map((session) => (
-                    <li key={session.sessionId} className="session-list__item">
+                    <li
+                      key={session.sessionId}
+                      className="session-list__item history-session-record"
+                    >
                       <div className="history-session__header">
-                        <p className="session-list__title">
+                        <p className="session-list__title history-session-record__time">
                           {formatDateTime(session.startTime)} –{" "}
                           {formatTimeOnly(session.endTime)}
                         </p>
@@ -286,27 +320,29 @@ export function StudentAttendanceHistoryPage() {
                           {statusLabel(session.status)}
                         </span>
                       </div>
-                      <p className="session-list__meta">
-                        Lecturer: {session.lecturerName}
-                      </p>
-                      <p className="session-list__meta">
-                        Location: {session.locationName}
-                      </p>
-                      <p className="session-list__meta">
-                        Attendance network: {session.attendanceNetworkName}
-                      </p>
-                      {session.markedAt !== null ? (
+                      <div className="history-session-record__details">
                         <p className="session-list__meta">
-                          Marked at {formatDateTime(session.markedAt)}
+                          Lecturer: {session.lecturerName}
                         </p>
-                      ) : null}
+                        <p className="session-list__meta">
+                          Location: {session.locationName}
+                        </p>
+                        <p className="session-list__meta">
+                          Attendance network: {session.attendanceNetworkName}
+                        </p>
+                        {session.markedAt !== null ? (
+                          <p className="session-list__meta">
+                            Marked at {formatDateTime(session.markedAt)}
+                          </p>
+                        ) : null}
+                      </div>
                     </li>
                   ))}
                 </ul>
               </section>
             );
           })}
-        </>
+        </div>
       ) : null}
     </main>
   );

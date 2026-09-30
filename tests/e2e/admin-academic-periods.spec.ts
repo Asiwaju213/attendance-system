@@ -15,10 +15,10 @@ let createdSessionName: string | null = null;
 let renamedSessionName: string | null = null;
 
 async function loginAsAdmin(page: Page): Promise<void> {
+  await page.goto("/staff/admin/login");
+  await page.getByLabel("Username").fill(E2E_ADMIN.username);
+  await page.getByLabel("Password").fill(E2E_ADMIN.password);
   await withLoginMutex("admin", async () => {
-    await page.goto("/staff/admin/login");
-    await page.getByLabel("Username").fill(E2E_ADMIN.username);
-    await page.getByLabel("Password").fill(E2E_ADMIN.password);
     await page.getByRole("button", { name: "Sign in" }).click();
     await expect(page).toHaveURL(/\/app\/admin$/, { timeout: 15_000 });
   });
@@ -48,10 +48,10 @@ test("an unauthenticated user is redirected to the admin login page", async ({
 });
 
 test("a student cannot reach the academic periods page", async ({ page }) => {
+  await page.goto("/login");
+  await page.getByLabel("Matric Number").fill(E2E_STUDENT.matricNumber);
+  await page.getByLabel("Password").fill(E2E_STUDENT.password);
   await withLoginMutex("student", async () => {
-    await page.goto("/login");
-    await page.getByLabel("Matric Number").fill(E2E_STUDENT.matricNumber);
-    await page.getByLabel("Password").fill(E2E_STUDENT.password);
     await page.getByRole("button", { name: "Sign in" }).click();
     await expect(page).toHaveURL(/\/app\/student$/, { timeout: 15_000 });
   });
@@ -65,10 +65,10 @@ test("a student cannot reach the academic periods page", async ({ page }) => {
 });
 
 test("a lecturer cannot reach the academic periods page", async ({ page }) => {
+  await page.goto("/staff/lecturer/login");
+  await page.getByLabel("Staff ID").fill(E2E_LECTURER.staffId);
+  await page.getByLabel("Password").fill(E2E_LECTURER.password);
   await withLoginMutex("lecturer", async () => {
-    await page.goto("/staff/lecturer/login");
-    await page.getByLabel("Staff ID").fill(E2E_LECTURER.staffId);
-    await page.getByLabel("Password").fill(E2E_LECTURER.password);
     await page.getByRole("button", { name: "Sign in" }).click();
     await expect(page).toHaveURL(/\/app\/lecturer$/, { timeout: 15_000 });
   });

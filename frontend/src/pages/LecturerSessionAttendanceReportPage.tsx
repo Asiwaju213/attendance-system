@@ -158,16 +158,17 @@ export function LecturerSessionAttendanceReportPage() {
 
   if (sessionId === null) {
     return (
-      <main className="app-page">
-        <header className="app-header">
-          <div>
+      <main className="app-page lecturer-reports-page">
+        <header className="app-header lecturer-reports-header">
+          <div className="lecturer-reports-header__copy">
+            <p className="lecturer-reports-header__eyebrow">Lecturer records</p>
             <h1>Session Attendance Report</h1>
           </div>
           <nav className="app-header__nav">
             <Link to="/app/lecturer/attendance">Back to attendance sessions</Link>
           </nav>
         </header>
-        <section className="app-card app-card--wide">
+        <section className="app-card app-card--wide lecturer-report-workspace">
           <div className="resource-error">
             <p role="alert" className="form-error">
               The attendance session could not be found.
@@ -189,9 +190,10 @@ export function LecturerSessionAttendanceReportPage() {
     students?.filter((student) => student.status === "ABSENT").length ?? 0;
 
   return (
-    <main className="app-page">
-      <header className="app-header">
-        <div>
+    <main className="app-page lecturer-reports-page">
+      <header className="app-header lecturer-reports-header">
+        <div className="lecturer-reports-header__copy">
+          <p className="lecturer-reports-header__eyebrow">Lecturer records</p>
           <h1>Session Attendance Report</h1>
           <p className="app-header__sub">
             Attendance for a single completed session.
@@ -202,7 +204,10 @@ export function LecturerSessionAttendanceReportPage() {
         </nav>
       </header>
 
-      <section className="app-card app-card--wide" aria-label="Session attendance report">
+      <section
+        className="app-card app-card--wide lecturer-report-workspace"
+        aria-label="Session attendance report"
+      >
         {reportError !== null ? (
           <div className="resource-error">
             <p role="alert" className="form-error">
@@ -222,7 +227,7 @@ export function LecturerSessionAttendanceReportPage() {
           </p>
         ) : session !== null && students !== null ? (
           <>
-            <div className="session-detail admin-detail">
+            <div className="session-detail admin-detail lecturer-report-context">
               <p>
                 <span className="app-detail__label">Course: </span>
                 {session.courseCode} — {session.courseTitle}
@@ -259,9 +264,9 @@ export function LecturerSessionAttendanceReportPage() {
               </p>
             </div>
 
-            <hr className="admin-detail__divider" />
+            <hr className="admin-detail__divider lecturer-report-divider" />
 
-            <div className="report-actions">
+            <div className="report-actions lecturer-report-actions">
               <p className="inline-status" role="status">
                 {students.length === 1
                   ? "1 student"
@@ -292,8 +297,8 @@ export function LecturerSessionAttendanceReportPage() {
                 </p>
               </div>
             ) : (
-              <div className="admin-table-scroll">
-                <table className="admin-table">
+              <div className="admin-table-scroll lecturer-report-table-wrap">
+                <table className="admin-table lecturer-report-table">
                   <thead>
                     <tr>
                       <th scope="col">Student</th>
@@ -305,20 +310,20 @@ export function LecturerSessionAttendanceReportPage() {
                   <tbody>
                     {students.map((student) => (
                       <tr key={student.studentId} className="admin-table__row">
-                        <td>
+                        <td data-label="Student">
                           <span className="admin-table__primary">
                             {student.studentName}
                           </span>
                         </td>
-                        <td>{student.matricNumber}</td>
-                        <td>
+                        <td data-label="Matric No.">{student.matricNumber}</td>
+                        <td data-label="Status">
                           <span
                             className={`history-status history-status--${student.status.toLowerCase()}`}
                           >
                             {statusLabel(student.status)}
                           </span>
                         </td>
-                        <td>
+                        <td data-label="Marked At">
                           {student.markedAt !== null
                             ? formatDateTime(student.markedAt)
                             : "—"}

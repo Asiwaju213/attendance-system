@@ -44,6 +44,25 @@ export const webauthnConfig = {
   // enrollment because attendance happens in-class on a known device.
   attendanceChallengeTtlMs: 5 * 60 * 1000,
 
+  // How long a student device-login challenge stays usable.  This is the shortest window in
+  // the system: the challenge is issued before the student is identified, is unauthenticated,
+  // and only needs to survive one passkey prompt.  It is persisted with an explicit
+  // `expires_at`, so the database enforces the bound even if this value is changed later.
+  loginChallengeTtlMs: 2 * 60 * 1000,
+
+  // Abuse brakes for the public student device login endpoints.  Challenge issuance is
+  // capped separately from verification so a caller cannot spin up unbounded outstanding
+  // challenges, and repeated failed verifications are capped to slow password guessing.
+  // Both are per-process and reset when the API restarts.
+  loginChallengeRateLimit: {
+    maxChallenges: 20,
+    windowMs: 5 * 60 * 1000,
+  },
+  loginFailureRateLimit: {
+    maxFailures: 10,
+    windowMs: 5 * 60 * 1000,
+  },
+
   // WebAuthn is configured for the platform authenticator (Windows Hello, Touch ID,
   // Android biometrics, ...) with discoverable credentials, matching the passkeys
   // best practices. Only ES256 (ECDSA P-256) keys are accepted so verification works

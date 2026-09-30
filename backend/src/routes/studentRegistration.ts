@@ -2,6 +2,7 @@ import { Request, Response, Router } from "express";
 import { requireAuth, requireStudent } from "../middleware/authenticate";
 import {
   getEligibleCourses,
+  getMyCourseRegistrations,
   registerCourses,
 } from "../services/studentCourseRegistrationStore";
 import { parseRegistrationSelection } from "../validation/studentCourseRegistrationValidation";
@@ -12,6 +13,23 @@ router.use(requireAuth, requireStudent);
 
 router.get("/registration/courses", async (req: Request, res: Response) => {
   const result = await getEligibleCourses(req.user!.id);
+  if (!result.ok) {
+    res.status(404).json({
+      error: "STUDENT_NOT_FOUND",
+      message: "The student profile could not be found.",
+    });
+    return;
+  }
+
+  res.status(200).json({ data: result.data });
+});
+
+// GET /api/student/course-registrations
+// The authenticated student's own ENROLLED courses for the active academic
+// session. The student identity comes from req.user.id only — never from
+// client-supplied parameters.
+router.get("/course-registrations", async (req: Request, res: Response) => {
+  const result = await getMyCourseRegistrations(req.user!.id);
   if (!result.ok) {
     res.status(404).json({
       error: "STUDENT_NOT_FOUND",

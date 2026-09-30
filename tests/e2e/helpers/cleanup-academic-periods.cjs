@@ -10,7 +10,18 @@ const backendDir = path.join(__dirname, "..", "..", "..", "backend");
 const nodeModules = path.join(backendDir, "node_modules");
 
 const dotenv = require(path.join(nodeModules, "dotenv"));
-dotenv.config({ path: path.join(backendDir, ".env"), override: true });
+dotenv.config({ path: path.join(backendDir, ".env"), override: false });
+
+const testDatabaseName = process.env.TEST_DATABASE_NAME ?? "oou_attendance_test";
+if (
+  process.env.NODE_ENV !== "test" ||
+  process.env.DATABASE_NAME !== testDatabaseName ||
+  !/^oou_attendance_test(?:_[a-z0-9]+)*$/.test(testDatabaseName)
+) {
+  throw new Error(
+    `Refusing academic-period cleanup: expected test database "${testDatabaseName}".`
+  );
+}
 
 const { Client } = require(path.join(nodeModules, "pg"));
 
@@ -28,6 +39,15 @@ async function main() {
 
   await client.connect();
   try {
+    const identity = await client.query(
+      "SELECT current_database() AS database_name"
+    );
+    const actualDatabaseName = identity.rows[0]?.database_name;
+    if (actualDatabaseName !== testDatabaseName) {
+      throw new Error(
+        `Refusing academic-period cleanup: connected to "${actualDatabaseName}".`
+      );
+    }
     await client.query("BEGIN");
     await client.query("DELETE FROM academic_sessions WHERE name LIKE $1", [
       `${E2E_SESSION_PREFIX}%`,

@@ -173,9 +173,10 @@ export function AdminAttendanceReportsPage() {
   const canExport = report !== null && !reportLoading && !exporting;
 
   return (
-    <main className="app-page">
-      <header className="app-header">
+    <main className="app-page admin-page">
+      <header className="app-header admin-page-header">
         <div>
+          <p className="admin-page-header__eyebrow">Administration</p>
           <h1>Attendance Reports</h1>
           <p className="app-header__sub">
             Attendance summaries for a course offering.

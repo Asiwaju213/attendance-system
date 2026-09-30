@@ -27,6 +27,17 @@ const REGISTRATION_FLAGS = 0x5d;
 // UP (0x01) | UV (0x04) — a user-verified authenticator performing an assertion.
 const ASSERTION_FLAGS = 0x05;
 
+/**
+ * UP | UV | AT — attested credential data with UV set but *neither* backup-eligibility (BE) nor
+ * backup-state (BS) set.
+ *
+ * This is how a non-discoverable credential presents itself at registration: the server asked
+ * for a resident key, but this authenticator did not create one, so it advertises no backup
+ * flags. Used to test that such a credential is recorded as non-discoverable and therefore
+ * refused by the usernameless login ceremony while still working for attendance.
+ */
+const LEGACY_REGISTRATION_FLAGS = 0x45;
+
 function sha256(data: Uint8Array): Uint8Array {
   return new Uint8Array(createHash("sha256").update(data).digest());
 }
@@ -203,6 +214,18 @@ export interface BuildRegistrationParams {
   rpId: string;
   /** Include `userHandle` in authenticatorData (optional per WebAuthn). */
   withUserHandle?: boolean;
+  /**
+   * Override the authenticator data flags. Defaults to UP|UV|BE|BS|AT, i.e. a discoverable,
+   * user-verified registration. Pass `LEGACY_REGISTRATION_FLAGS` to simulate a non-discoverable
+   * credential from an authenticator that ignored `residentKey: "required"`.
+   */
+  flags?: number;
+  /**
+   * Override `clientExtensionResults`. Defaults to `{}` (no extensions reported), which forces
+   * discovery of discoverability from the authenticator data flags. Set
+   * `{ credProps: { rk: boolean } }` to emulate a client that reports the `creds` extension.
+   */
+  clientExtensionResults?: Record<string, unknown>;
 }
 
 /**
@@ -214,11 +237,16 @@ export async function buildRegistrationResponse(
 ): Promise<RegistrationResponseJSON> {
   const { authenticator, challenge, origin, rpId } = params;
   const cdata = clientDataJSONBytes("webauthn.create", challenge, origin);
-  const authData = buildAuthData(rpId, REGISTRATION_FLAGS, 1, {
-    credentialId: authenticator.credentialId,
-    credentialPublicKey: authenticator.credentialPublicKey,
-    aaguid: AAGUID,
-  });
+  const authData = buildAuthData(
+    rpId,
+    params.flags ?? REGISTRATION_FLAGS,
+    1,
+    {
+      credentialId: authenticator.credentialId,
+      credentialPublicKey: authenticator.credentialPublicKey,
+      aaguid: AAGUID,
+    }
+  );
 
   const signature = await sign(
     authenticator.privateKey,
@@ -239,7 +267,7 @@ export async function buildRegistrationResponse(
     id,
     rawId: id,
     type: "public-key" as const,
-    clientExtensionResults: {},
+    clientExtensionResults: params.clientExtensionResults ?? {},
     response: {
       clientDataJSON: isoBase64URL.fromBuffer(cdata),
       attestationObject: isoBase64URL.fromBuffer(attestationObject),
@@ -293,4 +321,4 @@ export async function buildAuthenticationResponse(
   };
 }
 
-export { AAGUID };
+export { AAGUID, REGISTRATION_FLAGS, LEGACY_REGISTRATION_FLAGS };

@@ -26,20 +26,20 @@ test.afterAll(async () => {
 });
 
 async function loginAsLecturer(page: Page): Promise<void> {
+  await page.goto("/staff/lecturer/login");
+  await page.getByLabel("Staff ID").fill(E2E_LECTURER.staffId);
+  await page.getByLabel("Password").fill(E2E_LECTURER.password);
   await withLoginMutex("lecturer", async () => {
-    await page.goto("/staff/lecturer/login");
-    await page.getByLabel("Staff ID").fill(E2E_LECTURER.staffId);
-    await page.getByLabel("Password").fill(E2E_LECTURER.password);
     await page.getByRole("button", { name: "Sign in" }).click();
     await expect(page).toHaveURL(/\/app\/lecturer$/, { timeout: 15_000 });
   });
 }
 
 async function loginAsMonitorLecturer(page: Page): Promise<void> {
+  await page.goto("/staff/lecturer/login");
+  await page.getByLabel("Staff ID").fill(E2E_MONITOR_LECTURER.staffId);
+  await page.getByLabel("Password").fill(E2E_MONITOR_LECTURER.password);
   await withLoginMutex("lecturer", async () => {
-    await page.goto("/staff/lecturer/login");
-    await page.getByLabel("Staff ID").fill(E2E_MONITOR_LECTURER.staffId);
-    await page.getByLabel("Password").fill(E2E_MONITOR_LECTURER.password);
     await page.getByRole("button", { name: "Sign in" }).click();
     await expect(page).toHaveURL(/\/app\/lecturer$/, { timeout: 15_000 });
   });
@@ -81,10 +81,10 @@ test("an unauthenticated user is redirected to the lecturer login page", async (
 test("a student cannot reach the lecturer session report page", async ({
   page,
 }) => {
+  await page.goto("/login");
+  await page.getByLabel("Matric Number").fill(E2E_STUDENT.matricNumber);
+  await page.getByLabel("Password").fill(E2E_STUDENT.password);
   await withLoginMutex("student", async () => {
-    await page.goto("/login");
-    await page.getByLabel("Matric Number").fill(E2E_STUDENT.matricNumber);
-    await page.getByLabel("Password").fill(E2E_STUDENT.password);
     await page.getByRole("button", { name: "Sign in" }).click();
     await expect(page).toHaveURL(/\/app\/student$/);
   });
@@ -98,10 +98,10 @@ test("a student cannot reach the lecturer session report page", async ({
 test("an admin cannot reach the lecturer session report page", async ({
   page,
 }) => {
+  await page.goto("/staff/admin/login");
+  await page.getByLabel("Username").fill("e2e_admin");
+  await page.getByLabel("Password").fill(E2E_LECTURER.password);
   await withLoginMutex("admin", async () => {
-    await page.goto("/staff/admin/login");
-    await page.getByLabel("Username").fill("e2e_admin");
-    await page.getByLabel("Password").fill(E2E_LECTURER.password);
     await page.getByRole("button", { name: "Sign in" }).click();
     await expect(page).toHaveURL(/\/app\/admin$/);
   });

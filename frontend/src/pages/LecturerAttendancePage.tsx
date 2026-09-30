@@ -371,9 +371,10 @@ export function LecturerAttendancePage() {
     : "";
 
   return (
-    <main className="app-page">
-      <header className="app-header">
-        <div>
+    <main className="app-page lecturer-attendance-page">
+      <header className="app-header lecturer-attendance-header">
+        <div className="lecturer-attendance-header__copy">
+          <p className="lecturer-attendance-header__eyebrow">Lecturer workspace</p>
           <h1>Attendance Sessions</h1>
           <p className="app-header__sub">Start and manage your attendance sessions.</p>
         </div>
@@ -391,7 +392,10 @@ export function LecturerAttendancePage() {
         </nav>
       </header>
 
-      <section className="app-card app-card--wide" aria-labelledby="current-heading">
+      <section
+        className="app-card app-card--wide lecturer-attendance-section lecturer-current-section"
+        aria-labelledby="current-heading"
+      >
         <h2 id="current-heading">Current Session</h2>
 
         {sessions === null && sessionsError === null ? (
@@ -414,8 +418,8 @@ export function LecturerAttendancePage() {
         ) : null}
 
         {activeSession !== undefined ? (
-          <div className="session-detail">
-            <p className="session-detail__title">
+          <div className="session-detail lecturer-current-session">
+            <p className="session-detail__title lecturer-current-session__title">
               {activeSession.courseCode} — {activeSession.courseTitle}
             </p>
             <p>
@@ -432,18 +436,26 @@ export function LecturerAttendancePage() {
               <span className="app-detail__label">Location: </span>
               {activeSession.locationName}
             </p>
-            <p>
-              <span className="app-detail__label">Started: </span>
-              {formatDateTime(activeSession.startTime)}
-            </p>
-            <p>
-              <span className="app-detail__label">Ends: </span>
-              {formatDateTime(activeSession.endTime)}
-            </p>
-            <p>
-              <span className="app-detail__label">Late threshold: </span>
-              {activeSession.lateThresholdMinutes} minutes
-            </p>
+            <div className="lecturer-session-timing">
+              <div className="lecturer-session-timing__item">
+                <p className="lecturer-session-timing__label">Session time</p>
+                <p>
+                  <span className="app-detail__label">Started: </span>
+                  {formatDateTime(activeSession.startTime)}
+                </p>
+                <p>
+                  <span className="app-detail__label">Ends: </span>
+                  {formatDateTime(activeSession.endTime)}
+                </p>
+              </div>
+              <div className="lecturer-session-timing__item lecturer-session-timing__item--threshold">
+                <p className="lecturer-session-timing__label">Late threshold</p>
+                <p>
+                  <span className="app-detail__label">Late threshold: </span>
+                  {activeSession.lateThresholdMinutes} minutes
+                </p>
+              </div>
+            </div>
 
             {activeSession.currentState === "ACTIVE" ? (
               <p className="session-detail__countdown" aria-live="off">
@@ -498,7 +510,10 @@ export function LecturerAttendancePage() {
         ) : null}
       </section>
 
-      <section className="app-card app-card--wide" aria-labelledby="start-heading">
+      <section
+        className="app-card app-card--wide lecturer-attendance-section lecturer-start-section"
+        aria-labelledby="start-heading"
+      >
         <h2 id="start-heading">Start an Attendance Session</h2>
 
         {catalogLoading ? (
@@ -768,7 +783,10 @@ export function LecturerAttendancePage() {
         ) : null}
       </section>
 
-      <section className="app-card app-card--wide" aria-labelledby="history-heading">
+      <section
+        className="app-card app-card--wide lecturer-attendance-section lecturer-history-section"
+        aria-labelledby="history-heading"
+      >
         <h2 id="history-heading">Session History</h2>
 
         {sessions === null && sessionsError === null ? (
@@ -786,29 +804,61 @@ export function LecturerAttendancePage() {
         ) : null}
 
         {history !== null && history.length > 0 ? (
-          <ul className="session-list">
+          <ul className="session-list lecturer-session-list">
             {history.map((session) => (
-              <li key={session.id} className="session-list__item">
-                <p className="session-list__title">
-                  {session.courseCode} · {session.courseTitle}
-                </p>
+              <li
+                key={session.id}
+                className="session-list__item lecturer-session-record"
+              >
+                <div className="lecturer-session-record__header">
+                  <div>
+                    <p className="lecturer-session-record__code">
+                      {session.courseCode}
+                    </p>
+                    <h3 className="session-list__title lecturer-session-record__title">
+                      {session.courseTitle}
+                    </h3>
+                  </div>
+                  <span
+                    className={`session-status session-status--${session.currentState.toLowerCase()}`}
+                  >
+                    {historyStateLabel(session)}
+                  </span>
+                </div>
+
                 <p className="session-list__meta">
                   {session.attendanceNetworkName} · {session.locationName}
                 </p>
-                <p className="session-list__meta">
-                  {formatDateTime(session.startTime)}
-                  {session.endedAt !== null
-                    ? ` – ${formatDateTime(session.endedAt)}`
-                    : ""}{" "}
-                  · {historyStateLabel(session)}
-                </p>
+
+                <div className="lecturer-session-record__timing">
+                  <div className="lecturer-session-timing__item">
+                    <p className="lecturer-session-timing__label">Session time</p>
+                    <p className="session-list__title">
+                      <span className="app-detail__label">Started: </span>
+                      {formatDateTime(session.startTime)}
+                      {session.endedAt !== null
+                        ? ` – ${formatDateTime(session.endedAt)}`
+                        : ""}
+                    </p>
+                  </div>
+                  <div className="lecturer-session-timing__item lecturer-session-timing__item--threshold">
+                    <p className="lecturer-session-timing__label">Late threshold</p>
+                    <p className="session-list__meta">
+                      <span className="app-detail__label">Late threshold: </span>
+                      {session.lateThresholdMinutes} minutes
+                    </p>
+                  </div>
+                </div>
+
                 {session.currentState === "ENDED" ? (
-                  <Link
-                    className="secondary-button"
-                    to={`/app/lecturer/attendance-reports/session/${session.id}`}
-                  >
-                    View Attendance
-                  </Link>
+                  <div className="lecturer-session-record__action">
+                    <Link
+                      className="secondary-button"
+                      to={`/app/lecturer/attendance-reports/session/${session.id}`}
+                    >
+                      View Attendance
+                    </Link>
+                  </div>
                 ) : null}
               </li>
             ))}

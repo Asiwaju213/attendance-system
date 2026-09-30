@@ -5,36 +5,64 @@ const LOCK_DIR = join(__dirname, "..", "..", ".playwright-locks");
 const LOCK_FILE = join(LOCK_DIR, "login.lock");
 const LOCK_STALE_MS = 60_000;
 const MAX_ATTEMPTS = 2_400;
+const MAX_TRANSIENT_EPERM_RETRIES = 5;
+const RETRY_DELAY_MS = 25;
 
-async function ensureLockDir(): Promise<void> {
-  try {
-    await fs.mkdir(LOCK_DIR, { recursive: true });
-  } catch {
-    // ignore
+function errorCode(error: unknown): string | undefined {
+  return (error as NodeJS.ErrnoException).code;
+}
+
+async function waitBeforeRetry(): Promise<void> {
+  await new Promise((resolve) =>
+    setTimeout(resolve, RETRY_DELAY_MS + Math.random() * RETRY_DELAY_MS)
+  );
+}
+
+async function withTransientEppermRetry<T>(
+  operation: () => Promise<T>
+): Promise<T> {
+  for (let retry = 0; ; retry++) {
+    try {
+      return await operation();
+    } catch (error: unknown) {
+      if (
+        process.platform !== "win32" ||
+        errorCode(error) !== "EPERM" ||
+        retry >= MAX_TRANSIENT_EPERM_RETRIES
+      ) {
+        throw error;
+      }
+      await waitBeforeRetry();
+    }
   }
 }
 
 async function acquireLock(lockContent: string): Promise<void> {
+  await fs.mkdir(LOCK_DIR, { recursive: true });
+
   for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
     try {
-      await fs.writeFile(LOCK_FILE, lockContent, { flag: "wx" });
+      await withTransientEppermRetry(() =>
+        fs.writeFile(LOCK_FILE, lockContent, { flag: "wx" })
+      );
       return;
     } catch (error: unknown) {
-      if ((error as NodeJS.ErrnoException).code !== "EEXIST") {
+      if (errorCode(error) !== "EEXIST") {
         throw error;
       }
-      // Lock is held. If the owner died (e.g. a previous `playwright test`
-      // process was killed), the file is orphaned and must be reclaimed.
       try {
-        const stat = await fs.stat(LOCK_FILE);
+        const stat = await withTransientEppermRetry(() => fs.stat(LOCK_FILE));
         if (Date.now() - stat.mtimeMs > LOCK_STALE_MS) {
-          await fs.unlink(LOCK_FILE);
+          await withTransientEppermRetry(() => fs.unlink(LOCK_FILE));
           continue;
         }
-      } catch {
-        continue; // Lock disappeared while statting; retry immediately.
+      } catch (statError: unknown) {
+        if (errorCode(statError) === "ENOENT") {
+          continue;
+        }
+        throw statError;
       }
-      await new Promise((resolve) => setTimeout(resolve, 25 + Math.random() * 25));
+      await waitBeforeRetry();
     }
   }
   throw new Error(
@@ -45,12 +73,16 @@ async function acquireLock(lockContent: string): Promise<void> {
 
 async function releaseLock(lockContent: string): Promise<void> {
   try {
-    const current = await fs.readFile(LOCK_FILE, "utf8");
+    const current = await withTransientEppermRetry(() =>
+      fs.readFile(LOCK_FILE, "utf8")
+    );
     if (current === lockContent) {
-      await fs.unlink(LOCK_FILE);
+      await withTransientEppermRetry(() => fs.unlink(LOCK_FILE));
     }
-  } catch {
-    // Lock already released or does not exist.
+  } catch (error: unknown) {
+    if (errorCode(error) !== "ENOENT") {
+      throw error;
+    }
   }
 }
 
@@ -72,7 +104,6 @@ export async function withLoginMutex<T>(
   _role: "student" | "lecturer" | "admin",
   fn: () => Promise<T>
 ): Promise<T> {
-  await ensureLockDir();
   const lockContent = `${process.pid}-${Date.now()}-${Math.random()}`;
   await acquireLock(lockContent);
   try {

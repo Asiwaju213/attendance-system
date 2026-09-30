@@ -229,9 +229,10 @@ export function LecturerAttendanceReportsPage() {
     context !== null && context.totalCompletedSessions === 0;
 
   return (
-    <main className="app-page">
-      <header className="app-header">
-        <div>
+    <main className="app-page lecturer-reports-page">
+      <header className="app-header lecturer-reports-header">
+        <div className="lecturer-reports-header__copy">
+          <p className="lecturer-reports-header__eyebrow">Lecturer records</p>
           <h1>Attendance Reports</h1>
           <p className="app-header__sub">
             Attendance summaries for your course offerings.
@@ -243,7 +244,7 @@ export function LecturerAttendanceReportsPage() {
       </header>
 
       <section
-        className="app-card app-card--wide"
+        className="app-card app-card--wide lecturer-report-selector"
         aria-labelledby="report-offering-title"
       >
         <h2 id="report-offering-title">Choose a course offering</h2>
@@ -283,7 +284,10 @@ export function LecturerAttendanceReportsPage() {
         )}
       </section>
 
-      <section className="app-card app-card--wide" aria-label="Attendance report">
+      <section
+        className="app-card app-card--wide lecturer-report-workspace"
+        aria-label="Attendance report"
+      >
         {selectedId === null ? (
           <div className="admin-empty">
             <p className="form-error admin-empty__message" role="status">
@@ -313,7 +317,7 @@ export function LecturerAttendanceReportsPage() {
           </p>
         ) : context !== null && students !== null ? (
           <>
-            <div className="session-detail admin-detail">
+             <div className="session-detail admin-detail lecturer-report-context">
               <p>
                 <span className="app-detail__label">Course: </span>
                 {context.courseCode} — {context.courseTitle}
@@ -338,7 +342,7 @@ export function LecturerAttendanceReportsPage() {
               </p>
             </div>
 
-            <div className="report-actions">
+             <div className="report-actions lecturer-report-actions">
               <p className="inline-status" role="status">
                 {students.length === 1
                   ? "1 student"
@@ -363,7 +367,7 @@ export function LecturerAttendanceReportsPage() {
               </button>
             </div>
 
-            <hr className="admin-detail__divider" />
+             <hr className="admin-detail__divider lecturer-report-divider" />
 
             {noEnrolledStudents ? (
               <div className="admin-empty">
@@ -379,8 +383,8 @@ export function LecturerAttendanceReportsPage() {
                     yet. Percentages will appear once sessions are completed.
                   </p>
                 ) : null}
-                <div className="admin-table-scroll">
-                  <table className="admin-table">
+                 <div className="admin-table-scroll lecturer-report-table-wrap">
+                   <table className="admin-table lecturer-report-table">
                     <thead>
                       <tr>
                         <th scope="col">Student</th>
@@ -395,17 +399,17 @@ export function LecturerAttendanceReportsPage() {
                     <tbody>
                       {students.map((student) => (
                         <tr key={student.studentId} className="admin-table__row">
-                          <td>
+                          <td data-label="Student">
                             <span className="admin-table__primary">
                               {student.studentName}
                             </span>
                           </td>
-                          <td>{student.matricNumber}</td>
-                          <td>{student.totalCompletedSessions}</td>
-                          <td>{student.presentCount}</td>
-                          <td>{student.lateCount}</td>
-                          <td>{student.absentCount}</td>
-                          <td>
+                          <td data-label="Matric No.">{student.matricNumber}</td>
+                          <td data-label="Sessions">{student.totalCompletedSessions}</td>
+                          <td data-label="Present">{student.presentCount}</td>
+                          <td data-label="Late">{student.lateCount}</td>
+                          <td data-label="Absent">{student.absentCount}</td>
+                          <td data-label="Attendance %">
                             {formatPercentage(student.attendancePercentage)}
                           </td>
                         </tr>
@@ -418,7 +422,7 @@ export function LecturerAttendanceReportsPage() {
                   Session details by student
                 </h3>
                 {students.map((student) => (
-                  <div key={student.studentId} className="student-report">
+                   <div key={student.studentId} className="student-report lecturer-student-report">
                     <div className="student-report__header">
                       <div>
                         <p className="student-report__name">
@@ -441,11 +445,11 @@ export function LecturerAttendanceReportsPage() {
                           ? "No sessions"
                           : `View sessions (${student.sessions.length})`}
                       </summary>
-                      <ul className="session-list">
+                       <ul className="session-list lecturer-report-session-list">
                         {student.sessions.map((session) => (
                           <li
                             key={session.sessionId}
-                            className="session-list__item"
+                             className="session-list__item lecturer-report-session-record"
                           >
                             <div className="history-session__header">
                               <p className="session-list__title">

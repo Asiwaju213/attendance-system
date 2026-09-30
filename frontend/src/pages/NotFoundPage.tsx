@@ -5,6 +5,8 @@ export function NotFoundPage() {
   return (
     <AuthShell
       title="Page Not Found"
+      eyebrow="Not Found"
+      description="The requested page is not available in the OOU Attendance System."
       subtitle="The page you are looking for does not exist."
       footer={
         <>

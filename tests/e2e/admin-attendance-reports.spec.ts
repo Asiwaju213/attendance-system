@@ -13,10 +13,10 @@ const CLOSED_OFFERING_PATTERN = /E2E-101.*Second Semester/;
 const REPORT_API_URL = "**/api/admin/attendance-reports/course-offering/*";
 
 async function loginAsAdmin(page: Page): Promise<void> {
+  await page.goto("/staff/admin/login");
+  await page.getByLabel("Username").fill(E2E_ADMIN.username);
+  await page.getByLabel("Password").fill(E2E_ADMIN.password);
   await withLoginMutex("admin", async () => {
-    await page.goto("/staff/admin/login");
-    await page.getByLabel("Username").fill(E2E_ADMIN.username);
-    await page.getByLabel("Password").fill(E2E_ADMIN.password);
     await page.getByRole("button", { name: "Sign in" }).click();
     await expect(page).toHaveURL(/\/app\/admin$/, { timeout: 15_000 });
   });
@@ -112,10 +112,10 @@ test("an unauthenticated user is redirected to the admin login page", async ({
 });
 
 test("a student cannot reach the attendance reports page", async ({ page }) => {
+  await page.goto("/login");
+  await page.getByLabel("Matric Number").fill(E2E_STUDENT.matricNumber);
+  await page.getByLabel("Password").fill(E2E_STUDENT.password);
   await withLoginMutex("student", async () => {
-    await page.goto("/login");
-    await page.getByLabel("Matric Number").fill(E2E_STUDENT.matricNumber);
-    await page.getByLabel("Password").fill(E2E_STUDENT.password);
     await page.getByRole("button", { name: "Sign in" }).click();
     await expect(page).toHaveURL(/\/app\/student$/, { timeout: 15_000 });
   });
@@ -129,10 +129,10 @@ test("a student cannot reach the attendance reports page", async ({ page }) => {
 });
 
 test("a lecturer cannot reach the attendance reports page", async ({ page }) => {
+  await page.goto("/staff/lecturer/login");
+  await page.getByLabel("Staff ID").fill(E2E_LECTURER.staffId);
+  await page.getByLabel("Password").fill(E2E_LECTURER.password);
   await withLoginMutex("lecturer", async () => {
-    await page.goto("/staff/lecturer/login");
-    await page.getByLabel("Staff ID").fill(E2E_LECTURER.staffId);
-    await page.getByLabel("Password").fill(E2E_LECTURER.password);
     await page.getByRole("button", { name: "Sign in" }).click();
     await expect(page).toHaveURL(/\/app\/lecturer$/, { timeout: 15_000 });
   });
@@ -179,15 +179,14 @@ test("selecting E2E-101 loads its report context and enrolled student row from t
   const releaseLock = await acquireAdminReportsFixturesLock();
   try {
     await openReportsPage(page);
-    await selectOffering(page, OPEN_OFFERING_PATTERN);
-
-    // Wait for the report API response before asserting UI state so the test
-    // is deterministic under concurrent worker load.
-    await page.waitForResponse(
-      (response) =>
-        response.url().includes("/api/admin/attendance-reports/course-offering") &&
-        response.status() === 200
-    );
+    await Promise.all([
+      page.waitForResponse(
+        (response) =>
+          response.url().includes("/api/admin/attendance-reports/course-offering") &&
+          response.status() === 200
+      ),
+      selectOffering(page, OPEN_OFFERING_PATTERN),
+    ]);
 
     const report = reportSection(page);
     await expect(report.getByText("E2E-101 — E2E Computer Science 101")).toBeVisible();
@@ -215,15 +214,14 @@ test("selecting E2E-101 shows the correct attendance counts from the backend", a
   const releaseLock = await acquireAdminReportsFixturesLock();
   try {
     await openReportsPage(page);
-    await selectOffering(page, OPEN_OFFERING_PATTERN);
-
-    // Wait for the report API response before asserting UI state so the test
-    // is deterministic under concurrent worker load.
-    await page.waitForResponse(
-      (response) =>
-        response.url().includes("/api/admin/attendance-reports/course-offering") &&
-        response.status() === 200
-    );
+    await Promise.all([
+      page.waitForResponse(
+        (response) =>
+          response.url().includes("/api/admin/attendance-reports/course-offering") &&
+          response.status() === 200
+      ),
+      selectOffering(page, OPEN_OFFERING_PATTERN),
+    ]);
 
     const studentRow = page
       .locator(".admin-table__row")

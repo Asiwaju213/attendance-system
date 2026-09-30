@@ -1,9 +1,14 @@
 import { authConfig } from "../config/auth";
 import { pool } from "../db/pool";
-import { verifyPassword } from "../lib/passwords";
+import { verifyPasswordOrDummy } from "../lib/passwords";
 import { generateSessionToken, hashSessionToken } from "../lib/sessions";
 import { Role, SafeUser } from "../types/auth";
 import { createSession } from "./sessionStore";
+
+// Re-export commonly used functions for other modules
+export { verifyPasswordOrDummy } from "../lib/passwords";
+export { generateSessionToken } from "../lib/sessions";
+export { createSession } from "./sessionStore";
 
 export interface AuthenticatedResult {
   token: string;
@@ -48,11 +53,9 @@ const CANDIDATE_QUERIES: Record<Role, string> = {
 
 // A real Argon2id hash used when the identifier does not exist, so that a
 // nonexistent account consumes the same verification time as a wrong password
-// (prevents account enumeration by timing).
-const DUMMY_PASSWORD_HASH =
-  "$argon2id$v=19$m=65536,p=4,t=3$ozaKJsQc9MKty+erbgeqxQ$1BoK4KuIJCXOUG3GILjFDNMP+ht/u+MTceRBGvW1tug";
+// (prevents account enumeration by timing). Shared via `verifyPasswordOrDummy`.
 
-async function findLoginCandidate(
+export async function findLoginCandidate(
   role: Role,
   identifier: string
 ): Promise<LoginCandidate | null> {
@@ -64,7 +67,7 @@ async function findLoginCandidate(
   return { ...row, id: Number(row.id) };
 }
 
-function toSafeUser(candidate: LoginCandidate): SafeUser {
+export function toSafeUser(candidate: LoginCandidate): SafeUser {
   const role = candidate.role as Role;
   return {
     id: candidate.id,
@@ -84,11 +87,11 @@ export async function authenticate(
   const candidate = await findLoginCandidate(role, identifier);
 
   if (!candidate) {
-    await verifyPassword(DUMMY_PASSWORD_HASH, password);
+    await verifyPasswordOrDummy(null, password);
     return null;
   }
 
-  const passwordMatches = await verifyPassword(candidate.password_hash, password);
+  const passwordMatches = await verifyPasswordOrDummy(candidate.password_hash, password);
   if (!passwordMatches || candidate.status !== "ACTIVE") {
     return null;
   }

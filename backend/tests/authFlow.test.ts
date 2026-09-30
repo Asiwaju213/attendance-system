@@ -47,8 +47,15 @@ function cookieFrom(res: globalThis.Response): string | null {
   return cookie.slice(eq + 1, semi);
 }
 
-function cookieHeader(token: string): Record<string, string> {
-  return { cookie: `${authConfig.cookieName}=${token}` };
+function cookieHeader(token: string, rememberedToken?: string): Record<string, string> {
+  const parts: string[] = [];
+  if (token) {
+    parts.push(`${authConfig.cookieName}=${token}`);
+  }
+  if (rememberedToken) {
+    parts.push(`${authConfig.rememberedAccountCookieName}=${rememberedToken}`);
+  }
+  return { cookie: parts.join("; ") };
 }
 
 async function postJson(path: string, body: unknown, headers: Record<string, string> = {}) {
@@ -202,7 +209,7 @@ function assertSafeUser(
   assert.ok(!("session_token_hash" in user), "must never expose the token hash");
 }
 
-test("student login with valid credentials succeeds", async () => {
+test("student login with valid credentials succeeds (matric+password fallback)", async () => {
   const res = await postJson("/api/auth/student/login", {
     matricNumber: userCreds.activeStudent.matricNumber,
     password: TEST_PASSWORD,
@@ -211,7 +218,10 @@ test("student login with valid credentials succeeds", async () => {
   assert.equal(res.status, 200);
   const body = (await res.json()) as { user: Record<string, unknown> };
   const setCookie = res.headers.getSetCookie();
-  assert.ok(setCookie.length === 1, "a session cookie should be set");
+  // Fallback matric+password login only sets the session cookie.
+  // Device-binding cookie is set only during enrollment completion.
+  assert.ok(setCookie.length === 1, "only session cookie should be set for fallback login");
+  assert.ok(setCookie[0].startsWith(`${authConfig.cookieName}=`), "session cookie must be set");
   assert.ok(setCookie[0].includes("HttpOnly"), "cookie must be HttpOnly");
   assertSafeUser(body.user, "STUDENT", "matricNumber", userCreds.activeStudent.matricNumber);
 });
@@ -437,7 +447,7 @@ test("an expired session fails authentication", async () => {
   assert.equal(res.status, 401);
 });
 
-test("logout revokes the session, keeps the row, and clears the cookie", async () => {
+test("logout revokes the session, keeps the row, and clears the session cookie", async () => {
   const login = await postJson("/api/auth/lecturer/login", {
     staffId: userCreds.activeLecturer.staffId,
     password: TEST_PASSWORD,
@@ -449,7 +459,7 @@ test("logout revokes the session, keeps the row, and clears the cookie", async (
   assert.equal(res.status, 200);
 
   const cleared = res.headers.getSetCookie();
-  assert.ok(cleared.length === 1, "logout must clear the cookie");
+  assert.ok(cleared.length === 1, "logout must clear the session cookie");
   assert.ok(cleared[0].startsWith(`${authConfig.cookieName}=`));
 
   const stored = await pool.query(
@@ -463,13 +473,38 @@ test("logout revokes the session, keeps the row, and clears the cookie", async (
   assert.equal(afterLogout.status, 401, "revoked session must no longer work");
 });
 
+test("student logout preserves the device-binding cookie", async () => {
+  // First log in as a student with matric+password (no device-binding cookie yet)
+  const login = await postJson("/api/auth/student/login", {
+    matricNumber: userCreds.activeStudent.matricNumber,
+    password: TEST_PASSWORD,
+  });
+  const token = cookieFrom(login);
+  assert.ok(token);
+
+  // Matric+password login does NOT set a device-binding cookie (that's set during enrollment)
+  const deviceBindingToken = login.headers.getSetCookie().find(c => c.startsWith(`${authConfig.deviceBindingCookieName}=`));
+  assert.ok(!deviceBindingToken, "matric+password login must NOT set device-binding cookie");
+
+  // Now logout
+  const res = await postJson("/api/auth/logout", {}, cookieHeader(token));
+  assert.equal(res.status, 200);
+
+  const cleared = res.headers.getSetCookie();
+  // Should clear only the session cookie
+  assert.ok(cleared.length === 1, "logout must clear only the session cookie");
+  assert.ok(cleared[0].startsWith(`${authConfig.cookieName}=`));
+  const clearedDeviceBinding = cleared.find(c => c.startsWith(`${authConfig.deviceBindingCookieName}=`));
+  assert.ok(!clearedDeviceBinding, "logout must NOT clear the device-binding cookie");
+});
+
 test("logout is safe and idempotent when already logged out", async () => {
   const noCookie = await postJson("/api/auth/logout", {});
   assert.equal(noCookie.status, 200);
 
   const bogusToken = await postJson("/api/auth/logout", {}, cookieHeader("not-a-real-session-token"));
   assert.equal(bogusToken.status, 200);
-  assert.equal(bogusToken.headers.getSetCookie().length, 1, "cookie should still be cleared");
+  assert.equal(bogusToken.headers.getSetCookie().length, 1, "session cookie should still be cleared");
 });
 
 test("last_seen_at updates without extending expires_at", async () => {

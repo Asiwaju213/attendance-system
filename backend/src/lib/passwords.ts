@@ -16,3 +16,27 @@ export async function verifyPassword(
     return false;
   }
 }
+
+// A real Argon2id hash used when the account cannot be resolved, so that an unknown
+// identifier or a credential with no stored hash consumes the same verification time as a
+// wrong password (prevents account enumeration by timing).
+const DUMMY_PASSWORD_HASH =
+  "$argon2id$v=19$m=65536,p=4,t=3$ozaKJsQc9MKty+erbgeqxQ$1BoK4KuIJCXOUG3GILjFDNMP+ht/u+MTceRBGvW1tug";
+
+/**
+ * Verify a password, always paying the cost of one Argon2id verification.
+ *
+ * A null `passwordHash` means the account has no password set (e.g. a PENDING student
+ * awaiting registration), so there is nothing to compare against. The dummy hash keeps the
+ * response time indistinguishable from a wrong password.
+ */
+export async function verifyPasswordOrDummy(
+  passwordHash: string | null,
+  password: string
+): Promise<boolean> {
+  if (passwordHash === null) {
+    await verifyPassword(DUMMY_PASSWORD_HASH, password);
+    return false;
+  }
+  return verifyPassword(passwordHash, password);
+}

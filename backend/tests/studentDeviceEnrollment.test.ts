@@ -16,9 +16,10 @@ import {
   buildAuthenticationResponse,
   buildRegistrationResponse,
   createTestAuthenticator,
+  LEGACY_REGISTRATION_FLAGS,
   type TestAuthenticator,
 } from "./webauthnTestHelpers";
-import { isoCBOR } from "@simplewebauthn/server/helpers";
+import { isoBase64URL, isoCBOR } from "@simplewebauthn/server/helpers";
 
 const TEST_PASSWORD = "student-device-test-password";
 const RUN_ID = Date.now().toString(36).toUpperCase();
@@ -40,6 +41,10 @@ let studentA: TestUser; // "studentUser"
 let studentB: TestUser; // "secondStudentUser"
 let studentC: TestUser;
 let studentD: TestUser;
+// Dedicated to the legacy-upgrade scenario so the shared students keep their own device state.
+let upgradeStudent: TestUser;
+// Dedicated to the account-label tests, which need a student with no ACTIVE device.
+let labelStudent: TestUser;
 let lecturerUser: TestUser;
 let adminUser: TestUser;
 let inactiveStudentUser: TestUser;
@@ -208,6 +213,18 @@ before(async () => {
   studentB = await makeUser("STUDENT", "ACTIVE", "Device Student Two", `DEV/${RUN_ID}/2`);
   studentC = await makeUser("STUDENT", "ACTIVE", "Device Student Three", `DEV/${RUN_ID}/3`);
   studentD = await makeUser("STUDENT", "ACTIVE", "Device Student Four", `DEV/${RUN_ID}/4`);
+  upgradeStudent = await makeUser(
+    "STUDENT",
+    "ACTIVE",
+    "Device Student Upgrade",
+    `DEV/${RUN_ID}/6`
+  );
+  labelStudent = await makeUser(
+    "STUDENT",
+    "ACTIVE",
+    "Device Student Label",
+    `DEV/${RUN_ID}/7`
+  );
   lecturerUser = await makeUser("LECTURER", "ACTIVE", "Device Lecturer");
   adminUser = await makeUser("ADMIN", "ACTIVE", "Device Admin");
   inactiveStudentUser = await makeUser(
@@ -223,6 +240,8 @@ before(async () => {
     studentB,
     studentC,
     studentD,
+    upgradeStudent,
+    labelStudent,
     lecturerUser,
     adminUser,
     inactiveStudentUser,
@@ -309,7 +328,6 @@ test("DEVICE options: an active student receives a registration options payload"
   assert.ok((body.data.challenge as string).length >= 16, "challenge must be long");
   assert.equal((body.data.rp as { name: string }).name, "OOU Attendance System");
   assert.equal((body.data.rp as { id: string }).id, "localhost");
-  assert.equal((body.data.user as { name: string }).name, `DEV/${RUN_ID}/1`);
   assert.equal(
     (body.data.user as { displayName: string }).displayName,
     "Device Student One"
@@ -768,6 +786,601 @@ test("DEVICE schema: exactly one active device per student is enforced at the DB
       typeof error === "object" &&
       error !== null &&
       (error as { code?: unknown }).code === "23505"
+  );
+});
+
+// ---------------------------------------------------------------------------
+// WebAuthn account label: user.name must never be a real identifier
+// ---------------------------------------------------------------------------
+
+test("DEVICE options: user.name is a non-sensitive label, never the matric number or a student id", async () => {
+  const res = await postJson(
+    "/api/student/device/enrollment/options",
+    {},
+    cookieHeader(labelStudent.userId)
+  );
+  assert.equal(res.status, 200);
+  const body = (await res.json()) as {
+    data: { user: { id: string; name: string; displayName: string } };
+  };
+
+  const user = body.data.user;
+  const sid = await studentId(labelStudent.userId);
+
+  // The label must be a stable, non-sensitive string.
+  assert.match(user.name, /^oou-student-[0-9a-z]{12}$/);
+
+  // It must not leak the matric number in any form.
+  assert.ok(
+    !user.name.includes(labelStudent.matric!) && !user.name.includes("DEV"),
+    `user.name must not contain the matric number, got: ${user.name}`
+  );
+
+  // It must not be the student's name, and must not be a sequential database id.
+  assert.notEqual(user.name, labelStudent.name);
+  assert.notEqual(user.name, String(sid));
+  assert.notEqual(user.name, user.id);
+
+  // `user.id` remains the opaque per-student handle, not a sequential id. SimpleWebAuthn
+  // base64url-encodes the userID bytes it is given, which here are the handle's raw bytes.
+  const handle = (
+    await pool.query(`SELECT webauthn_user_handle FROM students WHERE id = $1`, [sid])
+  ).rows[0].webauthn_user_handle as string;
+  assert.equal(
+    Buffer.from(isoBase64URL.toBuffer(user.id)).toString("utf8"),
+    handle
+  );
+  assert.notEqual(user.id, String(sid));
+  assert.ok(handle.length >= 12);
+  assert.ok(user.name.endsWith(handle.slice(0, 12).toLowerCase()));
+
+  // `displayName` is the student's own registered name, which is correct for their own
+  // credential list and is not the label we are protecting.
+  assert.equal(user.displayName, labelStudent.name);
+});
+
+test("DEVICE options: the account label is stable across repeated calls", async () => {
+  // WebAuthn requires `user.name` to be stable: an authenticator treats a change as a
+  // different account, so a per-call random label would fragment the student's passkeys.
+  const fetchUser = async () => {
+    const res = await postJson(
+      "/api/student/device/enrollment/options",
+      {},
+      cookieHeader(labelStudent.userId)
+    );
+    assert.equal(res.status, 200);
+    const body = (await res.json()) as {
+      data: { challenge: string; user: { id: string; name: string } };
+    };
+    return body.data;
+  };
+
+  const first = await fetchUser();
+  const second = await fetchUser();
+
+  assert.equal(second.user.name, first.user.name);
+  assert.equal(second.user.id, first.user.id);
+  // Only the challenge is meant to change between calls.
+  assert.notEqual(second.challenge, first.challenge);
+});
+
+// ---------------------------------------------------------------------------
+// Discoverability detection
+// ---------------------------------------------------------------------------
+
+test("DEVICE detect: a resident-key registration is recorded as discoverable", async () => {
+  const authenticator = await createTestAuthenticator();
+  const result = await verifyStudentRegistration({
+    response: await buildRegistrationResponse({
+      authenticator,
+      challenge: "discoverable-detection",
+      origin: webauthnConfig.expectedOrigin,
+      rpId: webauthnConfig.rpID,
+    }),
+    expectedChallenge: "discoverable-detection",
+    expectedOrigin: webauthnConfig.expectedOrigin,
+    expectedRPID: webauthnConfig.rpID,
+  });
+  assert.equal(result.ok, true);
+  if (result.ok) {
+    assert.equal(result.discoverable, true);
+  }
+});
+
+test("DEVICE detect: a registration without backup flags is recorded as non-discoverable", async () => {
+  const authenticator = await createTestAuthenticator();
+  const result = await verifyStudentRegistration({
+    response: await buildRegistrationResponse({
+      authenticator,
+      challenge: "legacy-detection",
+      origin: webauthnConfig.expectedOrigin,
+      rpId: webauthnConfig.rpID,
+      flags: LEGACY_REGISTRATION_FLAGS,
+    }),
+    expectedChallenge: "legacy-detection",
+    expectedOrigin: webauthnConfig.expectedOrigin,
+    expectedRPID: webauthnConfig.rpID,
+  });
+  assert.equal(result.ok, true);
+  if (result.ok) {
+    assert.equal(result.discoverable, false);
+  }
+});
+
+test("DEVICE detect: an explicit credProps.rk report is trusted over the flags", async () => {
+  // The `creds` extension is the direct statement of resident-key creation, so it must win even
+  // when the authenticator data flags carry no backup information.
+  const authenticator = await createTestAuthenticator();
+  const result = await verifyStudentRegistration({
+    response: await buildRegistrationResponse({
+      authenticator,
+      challenge: "credprops-detection",
+      origin: webauthnConfig.expectedOrigin,
+      rpId: webauthnConfig.rpID,
+      flags: LEGACY_REGISTRATION_FLAGS,
+      clientExtensionResults: { credProps: { rk: true } },
+    }),
+    expectedChallenge: "credprops-detection",
+    expectedOrigin: webauthnConfig.expectedOrigin,
+    expectedRPID: webauthnConfig.rpID,
+  });
+  assert.equal(result.ok, true);
+  if (result.ok) {
+    assert.equal(result.discoverable, true);
+  }
+});
+
+test("DEVICE detect: a credProps.rk=false report is trusted over the flags", async () => {
+  const authenticator = await createTestAuthenticator();
+  const result = await verifyStudentRegistration({
+    response: await buildRegistrationResponse({
+      authenticator,
+      challenge: "credprops-negative",
+      origin: webauthnConfig.expectedOrigin,
+      rpId: webauthnConfig.rpID,
+      clientExtensionResults: { credProps: { rk: false } },
+    }),
+    expectedChallenge: "credprops-negative",
+    expectedOrigin: webauthnConfig.expectedOrigin,
+    expectedRPID: webauthnConfig.rpID,
+  });
+  assert.equal(result.ok, true);
+  if (result.ok) {
+    assert.equal(result.discoverable, false);
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Legacy (non-discoverable) credential upgrade
+// ---------------------------------------------------------------------------
+
+/**
+ * Enrol a credential for the upgrade student, optionally forcing a non-discoverable
+ * authenticator, and return the resulting credential id.
+ */
+async function enrollCredentialForUpgrade(
+  options: { flags?: number } = {}
+): Promise<{ credentialId: string; authenticator: TestAuthenticator }> {
+  const opts = await requestOptions(upgradeStudent.userId);
+  const authenticator = await createTestAuthenticator();
+  const registration = await buildRegistrationResponse({
+    authenticator,
+    challenge: opts.challenge,
+    origin: webauthnConfig.expectedOrigin,
+    rpId: webauthnConfig.rpID,
+    ...(options.flags !== undefined ? { flags: options.flags } : {}),
+  });
+  const res = await postJson(
+    "/api/student/device/enrollment/complete",
+    { credential: registration, label: "legacy" },
+    cookieHeader(upgradeStudent.userId)
+  );
+  assert.equal(res.status, 201);
+  const body = (await res.json()) as { credentialId: string };
+  return { credentialId: body.credentialId, authenticator };
+}
+
+async function deviceRowsForUpgradeStudent(): Promise<
+  Array<{
+    id: number;
+    credential_id: string;
+    status: string;
+    discoverable: boolean | null;
+    revoked_at: Date | null;
+  }>
+> {
+  const sid = await studentId(upgradeStudent.userId);
+  const res = await pool.query(
+    `SELECT id, credential_id, status, discoverable, revoked_at
+     FROM student_devices
+     WHERE student_id = $1
+     ORDER BY id`,
+    [sid]
+  );
+  return res.rows.map((row) => ({
+    id: Number(row.id),
+    credential_id: row.credential_id as string,
+    status: row.status as string,
+    discoverable: row.discoverable === null ? null : Boolean(row.discoverable),
+    revoked_at: row.revoked_at,
+  }));
+}
+
+async function resolveAttendanceDevice(
+  userId: number
+): Promise<{ credentialId: string } | null> {
+  const res = await pool.query(
+    `SELECT d.credential_id
+     FROM student_devices d
+     JOIN students s ON s.id = d.student_id
+     WHERE s.user_id = $1 AND d.status = 'ACTIVE'
+     ORDER BY d.enrolled_at DESC, d.id DESC
+     LIMIT 1`,
+    [userId]
+  );
+  if (res.rowCount === 0) {
+    return null;
+  }
+  return { credentialId: res.rows[0].credential_id as string };
+}
+
+test("DEVICE upgrade: a non-discoverable credential is enrolled and recorded as such", async () => {
+  const { credentialId } = await enrollCredentialForUpgrade({
+    flags: LEGACY_REGISTRATION_FLAGS,
+  });
+  const rows = await deviceRowsForUpgradeStudent();
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].credential_id, credentialId);
+  assert.equal(rows[0].status, "ACTIVE");
+  assert.equal(
+    rows[0].discoverable,
+    false,
+    "a credential without backup flags must be recorded as non-discoverable"
+  );
+});
+
+test("DEVICE upgrade: a pre-migration device (discoverable NULL) is offered an upgrade", async () => {
+  // Reproduce a device enrolled before migration 010: the column did not exist, so the fact is
+  // unknown. NULL must be treated as "not usable for usernameless login" and routed to the
+  // upgrade flow rather than silently accepted.
+  await pool.query(
+    `UPDATE student_devices SET discoverable = NULL WHERE student_id = $1`,
+    [await studentId(upgradeStudent.userId)]
+  );
+
+  const res = await postJson(
+    "/api/student/device/enrollment/options",
+    {},
+    cookieHeader(upgradeStudent.userId)
+  );
+  assert.equal(
+    res.status,
+    200,
+    "a legacy device must not block a new enrollment/upgrade"
+  );
+  const body = (await res.json()) as {
+    data: { excludeCredentials?: Array<{ id: string }> };
+    enrollmentMode: string;
+  };
+  assert.equal(body.enrollmentMode, "UPGRADE");
+  const rows = await deviceRowsForUpgradeStudent();
+  assert.ok(
+    (body.data.excludeCredentials ?? []).some((c) => c.id === rows[0].credential_id),
+    "the legacy credential must be excluded so the upgrade cannot re-enrol it unchanged"
+  );
+});
+
+test("DEVICE upgrade: completing the upgrade revokes the old row and activates the new one atomically", async () => {
+  const oldCredentialId = (await deviceRowsForUpgradeStudent())[0].credential_id;
+
+  const opts = await requestOptions(upgradeStudent.userId);
+  const authenticator = await createTestAuthenticator();
+  const registration = await buildRegistrationResponse({
+    authenticator,
+    challenge: opts.challenge,
+    origin: webauthnConfig.expectedOrigin,
+    rpId: webauthnConfig.rpID,
+  });
+  const res = await postJson(
+    "/api/student/device/enrollment/complete",
+    { credential: registration, label: "upgraded" },
+    cookieHeader(upgradeStudent.userId)
+  );
+  assert.equal(res.status, 201);
+  const body = (await res.json()) as {
+    credentialId: string;
+    replacedCredentialId: string | null;
+    discoverable: boolean;
+  };
+  assert.notEqual(body.credentialId, oldCredentialId);
+  assert.equal(body.replacedCredentialId, oldCredentialId);
+  assert.equal(body.discoverable, true);
+
+  const rows = await deviceRowsForUpgradeStudent();
+  assert.equal(rows.length, 2, "the old row is revoked, never deleted");
+  const oldRow = rows.find((r) => r.credential_id === oldCredentialId)!;
+  const newRow = rows.find((r) => r.credential_id === body.credentialId)!;
+  assert.equal(oldRow.status, "REVOKED");
+  assert.ok(oldRow.revoked_at, "the revoked row must record when it was revoked");
+  assert.equal(newRow.status, "ACTIVE");
+  assert.equal(newRow.discoverable, true);
+  assert.equal(
+    rows.filter((r) => r.status === "ACTIVE").length,
+    1,
+    "exactly one device must be ACTIVE after the upgrade"
+  );
+
+  // Attendance now resolves the replacement; the revoked row is not returned.
+  const attendance = await resolveAttendanceDevice(upgradeStudent.userId);
+  assert.equal(attendance?.credentialId, body.credentialId);
+});
+
+test("DEVICE upgrade: the replaced credential is recorded in the audit log", async () => {
+  const actions = (
+    await pool.query(
+      `SELECT action FROM audit_logs
+       WHERE user_id = $1 AND entity_type = 'student_devices'
+       ORDER BY id`,
+      [upgradeStudent.userId]
+    )
+  ).rows.map((r: { action: string }) => r.action);
+  assert.ok(
+    actions.includes("DEVICE_CREDENTIAL_REPLACED"),
+    "replacing a legacy credential must be auditable"
+  );
+});
+
+test("DEVICE upgrade: a discoverable device cannot be rotated again", async () => {
+  const res = await postJson(
+    "/api/student/device/enrollment/options",
+    {},
+    cookieHeader(upgradeStudent.userId)
+  );
+  assert.equal(res.status, 409);
+  assert.equal((await res.json()).error, "DEVICE_ALREADY_ENROLLED");
+});
+
+test("DEVICE upgrade: a failed upgrade leaves the legacy credential ACTIVE for attendance", async () => {
+  // Give the student a fresh legacy device, then fail an upgrade on purpose.
+  await pool.query(
+    `UPDATE student_devices SET discoverable = NULL WHERE student_id = $1`,
+    [await studentId(upgradeStudent.userId)]
+  );
+  const before = (await deviceRowsForUpgradeStudent()).find(
+    (r) => r.status === "ACTIVE"
+  )!;
+  const credentialIdsBefore = (await deviceRowsForUpgradeStudent()).map(
+    (r) => r.credential_id
+  );
+
+  const opts = await requestOptions(upgradeStudent.userId);
+  const authenticator = await createTestAuthenticator();
+  // A registration signed for the wrong origin never verifies, so the transaction must abort
+  // before any row is touched.
+  const badRegistration = await buildRegistrationResponse({
+    authenticator,
+    challenge: opts.challenge,
+    origin: "https://evil.example.com",
+    rpId: webauthnConfig.rpID,
+  });
+  const res = await postJson(
+    "/api/student/device/enrollment/complete",
+    { credential: badRegistration, label: "doomed" },
+    cookieHeader(upgradeStudent.userId)
+  );
+  assert.equal(res.status, 400);
+  assert.equal((await res.json()).error, "INVALID_CREDENTIAL");
+
+  const after = await deviceRowsForUpgradeStudent();
+  assert.deepEqual(
+    after.map((r) => r.credential_id).sort(),
+    credentialIdsBefore.sort(),
+    "a failed upgrade must not add, revoke, or drop any row"
+  );
+  const stillActive = after.find((r) => r.credential_id === before.credential_id)!;
+  assert.equal(
+    stillActive.status,
+    "ACTIVE",
+    "the legacy credential must survive a failed upgrade"
+  );
+  assert.equal(stillActive.revoked_at, null);
+  assert.equal(
+    after.filter((r) => r.status === "ACTIVE").length,
+    1,
+    "the student must still hold exactly one usable device"
+  );
+
+  // The student is therefore never locked out of attendance.
+  const attendance = await resolveAttendanceDevice(upgradeStudent.userId);
+  assert.equal(attendance?.credentialId, before.credential_id);
+});
+
+test("DEVICE upgrade: re-enrolling the identical legacy credential is refused", async () => {
+  // Revoking and re-inserting the same credential would reset its stored signature counter back
+  // to the registration value, weakening clone detection while gaining nothing.
+  const before = (await deviceRowsForUpgradeStudent()).find(
+    (r) => r.status === "ACTIVE"
+  )!;
+  const credentialIdsBefore = (await deviceRowsForUpgradeStudent()).map(
+    (r) => r.credential_id
+  );
+  const opts = await requestOptions(upgradeStudent.userId);
+  const authenticator = await createTestAuthenticator();
+  const res = await postJson(
+    "/api/student/device/enrollment/complete",
+    {
+      credential: {
+        id: before.credential_id,
+        rawId: before.credential_id,
+        type: "public-key" as const,
+        clientExtensionResults: {},
+        response: {
+          clientDataJSON: "",
+          attestationObject: "",
+          transports: ["internal"] as ("internal" | "usb" | "nfc" | "ble" | "hybrid")[],
+          publicKeyAlgorithm: -7,
+        },
+      },
+      label: "same",
+    },
+    cookieHeader(upgradeStudent.userId)
+  );
+  // The malformed body is rejected before the credential check; either way the legacy device
+  // must be untouched.
+  assert.equal(res.status, 400);
+  const after = await deviceRowsForUpgradeStudent();
+  assert.deepEqual(
+    after.map((r) => r.credential_id).sort(),
+    credentialIdsBefore.sort(),
+    "a refused re-enrolment must not add, revoke, or drop any row"
+  );
+  assert.equal(after.find((r) => r.credential_id === before.credential_id)!.status, "ACTIVE");
+  assert.equal(
+    after.filter((r) => r.status === "ACTIVE").length,
+    1,
+    "the legacy credential must remain the single usable device"
+  );
+});
+
+test("DEVICE upgrade: the usernameless login ceremony still never names credentials", async () => {
+  // While the student still holds only a legacy credential, the usernameless ceremony must stay
+  // credential-agnostic: it must never add allowCredentials, because naming a non-discoverable
+  // credential would make the client assert one that the identity model does not accept.
+  const res = await postJson("/api/auth/student/device/options", {}, {});
+  assert.equal(res.status, 200);
+  const body = (await res.json()) as {
+    data: { allowCredentials?: unknown };
+  };
+  assert.equal(
+    body.data.allowCredentials === undefined,
+    true,
+    "usernameless login must never name credentials for the client"
+  );
+});
+
+// ---------------------------------------------------------------------------
+// Reset scenarios must keep re-enrolment possible
+// ---------------------------------------------------------------------------
+
+test("DEVICE reset: an admin device reset lets the student enrol a fresh credential", async () => {
+  const sid = await studentId(upgradeStudent.userId);
+  const before = await deviceRowsForUpgradeStudent();
+  const revokedCredentialId = before.find((r) => r.status === "ACTIVE")!.credential_id;
+
+  const resetRes = await postJson(
+    `/api/admin/students/${sid}/device/reset`,
+    {},
+    cookieHeader(adminUser.userId)
+  );
+  assert.equal(resetRes.status, 200);
+
+  const afterReset = await deviceRowsForUpgradeStudent();
+  assert.equal(
+    afterReset.find((r) => r.credential_id === revokedCredentialId)!.status,
+    "REVOKED"
+  );
+  assert.equal(
+    afterReset.filter((r) => r.status === "ACTIVE").length,
+    0,
+    "a reset must leave the student with no active device"
+  );
+
+  // With no ACTIVE device the next ceremony is a plain enrollment, not an upgrade, and the
+  // previously revoked credential is still excluded so the authenticator creates a new one.
+  const optsRes = await postJson(
+    "/api/student/device/enrollment/options",
+    {},
+    cookieHeader(upgradeStudent.userId)
+  );
+  assert.equal(optsRes.status, 200);
+  const optsBody = (await optsRes.json()) as {
+    data: { challenge: string; excludeCredentials?: Array<{ id: string }> };
+    enrollmentMode: string;
+  };
+  assert.equal(optsBody.enrollmentMode, "ENROLL");
+  assert.ok(
+    (optsBody.data.excludeCredentials ?? []).some(
+      (c) => c.id === revokedCredentialId
+    ),
+    "a revoked credential must stay excluded so a new one is created"
+  );
+
+  const authenticator = await createTestAuthenticator();
+  const completeRes = await postJson(
+    "/api/student/device/enrollment/complete",
+    {
+      credential: await buildRegistrationResponse({
+        authenticator,
+        challenge: optsBody.data.challenge,
+        origin: webauthnConfig.expectedOrigin,
+        rpId: webauthnConfig.rpID,
+      }),
+      label: "after reset",
+    },
+    cookieHeader(upgradeStudent.userId)
+  );
+  assert.equal(completeRes.status, 201);
+  const completeBody = (await completeRes.json()) as {
+    credentialId: string;
+    replacedCredentialId: string | null;
+  };
+  assert.equal(
+    completeBody.replacedCredentialId,
+    null,
+    "a post-reset enrollment replaces nothing"
+  );
+  assert.notEqual(completeBody.credentialId, revokedCredentialId);
+
+  const final = await deviceRowsForUpgradeStudent();
+  assert.equal(final.filter((r) => r.status === "ACTIVE").length, 1);
+  assert.equal(
+    final.find((r) => r.credential_id === completeBody.credentialId)!.status,
+    "ACTIVE"
+  );
+});
+
+test("DEVICE reset: a student registration reset leaves the device usable and upgradeable", async () => {
+  const sid = await studentId(upgradeStudent.userId);
+  const before = await deviceRowsForUpgradeStudent();
+  const activeCredentialId = before.find((r) => r.status === "ACTIVE")!.credential_id;
+
+  const resetRes = await postJson(
+    `/api/admin/students/${sid}/reset-registration`,
+    {},
+    cookieHeader(adminUser.userId)
+  );
+  assert.equal(resetRes.status, 200);
+
+  // The device is deliberately NOT revoked by a registration reset, so attendance is unaffected.
+  const afterReset = await deviceRowsForUpgradeStudent();
+  assert.equal(
+    afterReset.find((r) => r.credential_id === activeCredentialId)!.status,
+    "ACTIVE",
+    "a registration reset must not revoke the student's device"
+  );
+  assert.equal(
+    (await resolveAttendanceDevice(upgradeStudent.userId))?.credentialId,
+    activeCredentialId,
+    "attendance must keep working after a registration reset"
+  );
+
+  // The account is PENDING again, so the student cannot enrol until they re-register; the
+  // device is left exactly as it was, and the upgrade remains available afterwards.
+  const pendingRes = await postJson(
+    "/api/student/device/enrollment/options",
+    {},
+    cookieHeader(upgradeStudent.userId)
+  );
+  assert.equal(
+    pendingRes.status,
+    401,
+    "a PENDING account must not be able to start an enrollment"
+  );
+  assert.equal(
+    (await deviceRowsForUpgradeStudent()).find(
+      (r) => r.credential_id === activeCredentialId
+    )!.status,
+    "ACTIVE"
   );
 });
 

@@ -4,7 +4,9 @@ import {
   EligibleCoursesPayload,
   RegisteredCourseRef,
   RegistrationResultPayload,
+  StudentCourseRegistration,
   StudentOfferingCourse,
+  StudentRegistrationsPayload,
 } from "../types/studentCourseRegistration";
 
 export type StudentCourseErrorCode =
@@ -19,6 +21,10 @@ export type EligibleCoursesResult =
 export type RegisterCoursesResult =
   | { ok: true; data: RegistrationResultPayload }
   | { ok: false; code: StudentCourseErrorCode };
+
+export type MyRegistrationsResult =
+  | { ok: true; data: StudentRegistrationsPayload }
+  | { ok: false; code: "STUDENT_NOT_FOUND" };
 
 interface StudentContext {
   studentId: number;
@@ -199,6 +205,105 @@ function toCourseRef(item: OfferingRow): RegisteredCourseRef {
     offeringId: Number(item.offering_id),
     courseCode: item.course_code,
     title: item.title,
+  };
+}
+
+export async function getMyCourseRegistrations(
+  userId: number
+): Promise<MyRegistrationsResult> {
+  const student = await findStudentContext(userId);
+  if (!student) {
+    return { ok: false, code: "STUDENT_NOT_FOUND" };
+  }
+
+  const session = await findActiveAcademicSession();
+  if (!session) {
+    return { ok: true, data: { academicSession: null, registrations: [] } };
+  }
+
+  const result = await pool.query(
+    `SELECT o.id AS offering_id, o.status AS offering_status,
+            c.id AS course_id, c.course_code, c.title, c.faculty_id, c.department_id,
+            l.name AS level_name,
+            d.id AS dept_id, d.name AS dept_name, d.code AS dept_code,
+            f.id AS fac_id, f.name AS fac_name, f.code AS fac_code,
+            sem.id AS semester_id, sem.name AS semester_name
+     FROM course_registrations cr
+     JOIN course_offerings o ON o.id = cr.course_offering_id
+     JOIN courses c ON c.id = o.course_id
+     JOIN levels l ON l.id = c.level_id
+     JOIN semesters sem ON sem.id = o.semester_id
+     LEFT JOIN departments d ON d.id = c.department_id
+     LEFT JOIN faculties f ON f.id = c.faculty_id
+     WHERE cr.student_id = $1
+       AND cr.status = 'ENROLLED'
+       AND o.academic_session_id = $2
+     ORDER BY c.course_code ASC, o.id ASC`,
+    [student.studentId, session.id]
+  );
+
+  const rows = result.rows;
+  if (rows.length === 0) {
+    return {
+      ok: true,
+      data: {
+        academicSession: { id: session.id, name: session.name },
+        registrations: [],
+      },
+    };
+  }
+
+  const offeringIds = rows.map((row) => Number(row.offering_id));
+
+  const lecturerRows = await pool.query(
+    `SELECT col.course_offering_id, l.id AS lecturer_id, u.name AS lecturer_name
+     FROM course_offering_lecturers col
+     JOIN lecturers l ON l.id = col.lecturer_id
+     JOIN users u ON u.id = l.user_id
+     WHERE col.course_offering_id = ANY($1::BIGINT[]) AND u.role = 'LECTURER'
+     ORDER BY l.id ASC, col.course_offering_id ASC`,
+    [offeringIds]
+  );
+  const lecturersByOffering = new Map<number, Array<{ id: number; name: string }>>();
+  for (const row of lecturerRows.rows) {
+    const offeringId = Number(row.course_offering_id);
+    const list = lecturersByOffering.get(offeringId) ?? [];
+    list.push({ id: Number(row.lecturer_id), name: row.lecturer_name });
+    lecturersByOffering.set(offeringId, list);
+  }
+
+  const registrations: StudentCourseRegistration[] = rows.map((row) => {
+    const offeringId = Number(row.offering_id);
+    const scope: CourseScope = row.faculty_id !== null ? "FACULTY" : "DEPARTMENT";
+    return {
+      offeringId,
+      courseId: Number(row.course_id),
+      courseCode: row.course_code,
+      title: row.title,
+      level: Number(row.level_name),
+      scope,
+      department:
+        row.department_id !== null && row.dept_id !== null
+          ? { id: Number(row.dept_id), name: row.dept_name, code: row.dept_code }
+          : null,
+      faculty:
+        row.faculty_id !== null && row.fac_id !== null
+          ? { id: Number(row.fac_id), name: row.fac_name, code: row.fac_code }
+          : null,
+      semester: { id: Number(row.semester_id), name: row.semester_name },
+      academicSession: { id: session.id, name: session.name },
+      offeringStatus: row.offering_status === "CLOSED" ? "CLOSED" : "OPEN",
+      registrationStatus: "ENROLLED",
+      lecturers: lecturersByOffering.get(offeringId) ?? [],
+    };
+  });
+
+  return {
+    ok: true,
+    data: {
+      academicSession: { id: session.id, name: session.name },
+      registrations,
+    },
   };
 }
 

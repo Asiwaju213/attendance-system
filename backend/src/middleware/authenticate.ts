@@ -5,7 +5,7 @@ import { findSessionByTokenHash, isSessionActive, updateLastSeen } from "../serv
 import { findActiveUserById } from "../services/userStore";
 import { Role } from "../types/auth";
 
-function getCookieValue(req: Request, name: string): string | null {
+export function getCookieValue(req: Request, name: string): string | null {
   const header = req.headers.cookie;
   if (!header) {
     return null;

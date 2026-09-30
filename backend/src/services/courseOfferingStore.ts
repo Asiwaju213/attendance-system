@@ -2,8 +2,11 @@ import { pool } from "../db/pool";
 import {
   AssignedLecturer,
   CourseOffering,
+  CourseOfferingRegistrations,
   OfferingForLecturer,
   OfferingStatus,
+  RegistrationRosterItem,
+  RegistrationStatus,
 } from "../types/courseOffering";
 import { OrganizationStatus } from "../types/organization";
 import { Role } from "../types/auth";
@@ -12,6 +15,7 @@ import {
   OfferingCreateInput,
   OfferingListFilters,
   OfferingUpdateInput,
+  RegistrationListFilters,
 } from "../validation/adminCourseOfferingValidation";
 
 export type OfferingErrorCode =
@@ -27,7 +31,19 @@ export type OfferingErrorCode =
   | "NOT_A_LECTURER"
   | "LECTURER_NOT_ACTIVE"
   | "ALREADY_ASSIGNED"
-  | "NOT_ASSIGNED";
+  | "NOT_ASSIGNED"
+  | "INVALID_STATUS"
+  | "INVALID_PAGINATION"
+  | "STUDENT_NOT_FOUND"
+  | "STUDENT_NOT_ACTIVE"
+  | "STUDENT_WRONG_LEVEL"
+  | "STUDENT_WRONG_FACULTY"
+  | "STUDENT_WRONG_DEPARTMENT"
+  | "OFFERING_NOT_OPEN"
+  | "NO_ACTIVE_ACADEMIC_SESSION"
+  | "ALREADY_ENROLLED"
+  | "ALREADY_DROPPED"
+  | "ALREADY_COMPLETED";
 
 export type OfferingWriteResult<T> =
   | { ok: true; data: T }
@@ -525,4 +541,389 @@ export async function removeLecturer(
     return { ok: false, code: "NOT_ASSIGNED" };
   }
   return { ok: true };
+}
+
+interface RegistrationRosterRow {
+  registration_id: string;
+  student_id: string;
+  matric_number: string;
+  student_name: string;
+  department_id: string;
+  department_name: string;
+  department_code: string;
+  level_id: string;
+  level_name: string;
+  status: RegistrationStatus;
+  registered_at: Date;
+}
+
+interface CourseOfferingContextRow {
+  id: string;
+  course_id: string;
+  course_code: string;
+  course_title: string;
+  academic_session_name: string;
+  semester_name: string;
+  level_id: string;
+  level_name: string;
+  status: OfferingStatus;
+}
+
+function toRegistrationRosterItem(row: RegistrationRosterRow): RegistrationRosterItem {
+  return {
+    registrationId: Number(row.registration_id),
+    studentId: Number(row.student_id),
+    matricNumber: row.matric_number,
+    studentName: row.student_name,
+    department: {
+      id: Number(row.department_id),
+      name: row.department_name,
+      code: row.department_code,
+    },
+    level: {
+      id: Number(row.level_id),
+      name: Number(row.level_name),
+    },
+    status: row.status,
+    registeredAt: row.registered_at,
+  };
+}
+
+function toOfferingContext(row: CourseOfferingContextRow) {
+  return {
+    id: Number(row.id),
+    courseCode: row.course_code,
+    courseTitle: row.course_title,
+    academicSession: row.academic_session_name,
+    semester: row.semester_name,
+    level: {
+      id: Number(row.level_id),
+      name: Number(row.level_name),
+    },
+    status: row.status,
+  };
+}
+
+export async function getOfferingRegistrations(
+  offeringId: number,
+  filters: RegistrationListFilters
+): Promise<OfferingWriteResult<CourseOfferingRegistrations>> {
+  const offering = await findOfferingById(offeringId);
+  if (!offering) {
+    return { ok: false, code: "NOT_FOUND" };
+  }
+
+  const contextResult = await pool.query(
+    `SELECT o.id, o.course_id, c.course_code, c.title AS course_title,
+            sess.name AS academic_session_name,
+            sem.name AS semester_name,
+            l.id AS level_id, l.name AS level_name,
+            o.status
+     FROM course_offerings o
+     JOIN courses c ON c.id = o.course_id
+     JOIN academic_sessions sess ON sess.id = o.academic_session_id
+     JOIN semesters sem ON sem.id = o.semester_id
+     JOIN levels l ON l.id = c.level_id
+     WHERE o.id = $1`,
+    [offeringId]
+  );
+  const contextRow = contextResult.rows[0] as CourseOfferingContextRow | undefined;
+  if (!contextRow) {
+    return { ok: false, code: "NOT_FOUND" };
+  }
+
+  const conditions: string[] = ["cr.course_offering_id = $1"];
+  const values: unknown[] = [offeringId];
+  let paramIndex = 2;
+
+  if (filters.status !== undefined) {
+    values.push(filters.status);
+    conditions.push(`cr.status = $${paramIndex++}`);
+  }
+
+  if (filters.matricNumber !== undefined) {
+    values.push(`%${filters.matricNumber}%`);
+    conditions.push(`st.matric_number ILIKE $${paramIndex++}`);
+  }
+
+  if (filters.studentName !== undefined) {
+    values.push(`%${filters.studentName}%`);
+    conditions.push(`u.name ILIKE $${paramIndex++}`);
+  }
+
+  const whereClause = conditions.join(" AND ");
+
+  const countResult = await pool.query(
+    `SELECT count(*)::int AS total
+     FROM course_registrations cr
+     JOIN students st ON st.id = cr.student_id
+     JOIN users u ON u.id = st.user_id
+     WHERE ${whereClause}`,
+    values
+  );
+  const total = Number(countResult.rows[0].total);
+
+  let limitClause = "";
+  if (filters.limit !== undefined && filters.limit > 0) {
+    values.push(filters.limit);
+    limitClause = ` LIMIT $${paramIndex++}`;
+  }
+  if (filters.offset !== undefined && filters.offset > 0) {
+    values.push(filters.offset);
+    limitClause = `${limitClause} OFFSET $${paramIndex++}`;
+  }
+
+  const itemsResult = await pool.query(
+    `SELECT cr.id AS registration_id,
+            st.id AS student_id,
+            st.matric_number,
+            u.name AS student_name,
+            d.id AS department_id,
+            d.name AS department_name,
+            d.code AS department_code,
+            l.id AS level_id,
+            l.name AS level_name,
+            cr.status,
+            cr.registered_at
+     FROM course_registrations cr
+     JOIN students st ON st.id = cr.student_id
+     JOIN users u ON u.id = st.user_id
+     JOIN departments d ON d.id = st.department_id
+     JOIN levels l ON l.id = st.level_id
+     WHERE ${whereClause}
+     ORDER BY u.name ASC, st.matric_number ASC
+     ${limitClause}`,
+    values
+  );
+
+  return {
+    ok: true,
+    data: {
+      courseOffering: toOfferingContext(contextRow),
+      total,
+      items: itemsResult.rows.map(toRegistrationRosterItem),
+    },
+  };
+}
+
+interface AdminEnrollStudentInput {
+  adminUserId: number;
+  offeringId: number;
+  studentId: number;
+}
+
+interface AdminEnrollmentResult {
+  registration: {
+    id: number;
+    studentId: number;
+    courseOfferingId: number;
+    status: RegistrationStatus;
+    createdAt: Date;
+    updatedAt: Date;
+  };
+}
+
+export type AdminEnrollmentWriteResult =
+  | { ok: true; data: AdminEnrollmentResult }
+  | { ok: false; code: OfferingErrorCode };
+
+async function findStudentById(
+  studentId: number
+): Promise<{
+  id: number;
+  userId: number;
+  matricNumber: string;
+  name: string;
+  departmentId: number;
+  levelId: number;
+  userStatus: OrganizationStatus;
+} | null> {
+  const result = await pool.query(
+    `SELECT s.id, s.user_id, s.matric_number, s.department_id, s.level_id,
+            u.name, u.status AS user_status
+     FROM students s
+     JOIN users u ON u.id = s.user_id
+     WHERE s.id = $1`,
+    [studentId]
+  );
+  const row = result.rows[0];
+  if (!row) {
+    return null;
+  }
+  return {
+    id: Number(row.id),
+    userId: Number(row.user_id),
+    matricNumber: row.matric_number,
+    name: row.name,
+    departmentId: Number(row.department_id),
+    levelId: Number(row.level_id),
+    userStatus: row.user_status,
+  };
+}
+
+async function findAdminName(adminUserId: number): Promise<string | null> {
+  const result = await pool.query(
+    `SELECT name FROM users WHERE id = $1 AND role = 'ADMIN' LIMIT 1`,
+    [adminUserId]
+  );
+  const row = result.rows[0];
+  return row?.name ?? null;
+}
+
+export async function adminEnrollStudent(
+  input: AdminEnrollStudentInput
+): Promise<AdminEnrollmentWriteResult> {
+  const { adminUserId, offeringId, studentId } = input;
+
+  const offering = await findOfferingById(offeringId);
+  if (!offering) {
+    return { ok: false, code: "NOT_FOUND" };
+  }
+
+  if (offering.status !== "OPEN") {
+    return { ok: false, code: "OFFERING_NOT_OPEN" };
+  }
+
+  const course = await findCourseById(offering.courseId);
+  if (!course) {
+    return { ok: false, code: "COURSE_NOT_FOUND" };
+  }
+  if (course.status !== "ACTIVE") {
+    return { ok: false, code: "COURSE_NOT_ACTIVE" };
+  }
+
+  const session = await findAcademicSessionById(offering.academicSessionId);
+  if (!session) {
+    return { ok: false, code: "ACADEMIC_SESSION_NOT_FOUND" };
+  }
+
+  const semester = await findSemesterById(offering.semesterId);
+  if (!semester) {
+    return { ok: false, code: "SEMESTER_NOT_FOUND" };
+  }
+
+  const activeSession = await pool.query(
+    `SELECT id FROM academic_sessions WHERE id = $1 AND is_active = true LIMIT 1`,
+    [offering.academicSessionId]
+  );
+  if (activeSession.rowCount === 0) {
+    return { ok: false, code: "NO_ACTIVE_ACADEMIC_SESSION" };
+  }
+
+  const student = await findStudentById(studentId);
+  if (!student) {
+    return { ok: false, code: "STUDENT_NOT_FOUND" };
+  }
+  if (student.userStatus !== "ACTIVE") {
+    return { ok: false, code: "STUDENT_NOT_ACTIVE" };
+  }
+
+  const offeringDetails = await pool.query(
+    `SELECT c.level_id, c.faculty_id, c.department_id
+     FROM course_offerings o
+     JOIN courses c ON c.id = o.course_id
+     WHERE o.id = $1`,
+    [offeringId]
+  );
+  const offeringDetailsRow = offeringDetails.rows[0];
+  if (!offeringDetailsRow) {
+    return { ok: false, code: "NOT_FOUND" };
+  }
+
+  const offeringLevelId = Number(offeringDetailsRow.level_id);
+  const courseFacultyId = offeringDetailsRow.faculty_id === null ? null : Number(offeringDetailsRow.faculty_id);
+  const courseDepartmentId = offeringDetailsRow.department_id === null ? null : Number(offeringDetailsRow.department_id);
+
+  if (student.levelId !== offeringLevelId) {
+    return { ok: false, code: "STUDENT_WRONG_LEVEL" };
+  }
+
+  if (courseFacultyId !== null) {
+    if (student.departmentId === undefined || student.departmentId === null) {
+      return { ok: false, code: "STUDENT_WRONG_FACULTY" };
+    }
+    const dept = await pool.query(
+      `SELECT faculty_id FROM departments WHERE id = $1`,
+      [student.departmentId]
+    );
+    const deptRow = dept.rows[0];
+    if (!deptRow || Number(deptRow.faculty_id) !== courseFacultyId) {
+      return { ok: false, code: "STUDENT_WRONG_FACULTY" };
+    }
+  } else if (courseDepartmentId !== null) {
+    if (student.departmentId !== courseDepartmentId) {
+      return { ok: false, code: "STUDENT_WRONG_DEPARTMENT" };
+    }
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+
+    const existingReg = await client.query(
+      `SELECT id, status, created_at, updated_at
+       FROM course_registrations
+       WHERE student_id = $1 AND course_offering_id = $2`,
+      [student.id, offeringId]
+    );
+
+    if (existingReg.rowCount && existingReg.rowCount > 0) {
+      const existing = existingReg.rows[0];
+      await client.query("ROLLBACK");
+      const existingStatus = existing.status as RegistrationStatus;
+      if (existingStatus === "ENROLLED") {
+        return { ok: false, code: "ALREADY_ENROLLED" };
+      }
+      if (existingStatus === "DROPPED") {
+        return { ok: false, code: "ALREADY_DROPPED" };
+      }
+      if (existingStatus === "COMPLETED") {
+        return { ok: false, code: "ALREADY_COMPLETED" };
+      }
+      return { ok: false, code: "CONFLICT" };
+    }
+
+    const regResult = await client.query(
+      `INSERT INTO course_registrations (student_id, course_offering_id, status)
+       VALUES ($1, $2, 'ENROLLED')
+       RETURNING id, student_id, course_offering_id, status, created_at, updated_at`,
+      [student.id, offeringId]
+    );
+
+    const adminName = await findAdminName(adminUserId);
+    await client.query(
+      `INSERT INTO audit_logs (user_id, action, entity_type, entity_id, description)
+       VALUES ($1, 'STUDENT_COURSE_ENROLLMENT', 'course_registrations', $2, $3)`,
+      [
+        adminUserId,
+        Number(regResult.rows[0].id),
+        `Admin ${adminName ?? `(id ${adminUserId})`} enrolled student ${student.matricNumber} (${student.name}) in course offering ${offeringId}.`,
+      ]
+    );
+
+    await client.query("COMMIT");
+
+    const reg = regResult.rows[0];
+    return {
+      ok: true,
+      data: {
+        registration: {
+          id: Number(reg.id),
+          studentId: Number(reg.student_id),
+          courseOfferingId: Number(reg.course_offering_id),
+          status: reg.status as RegistrationStatus,
+          createdAt: reg.created_at,
+          updatedAt: reg.updated_at,
+        },
+      },
+    };
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => undefined);
+    if (pgErrorCode(error) === "23505") {
+      return { ok: false, code: "CONFLICT" };
+    }
+    throw error;
+  } finally {
+    client.release();
+  }
 }

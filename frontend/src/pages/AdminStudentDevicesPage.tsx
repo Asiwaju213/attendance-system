@@ -133,9 +133,10 @@ export function AdminStudentDevicesPage() {
   const loading = devices === null && error === null;
 
   return (
-    <main className="app-page">
-      <header className="app-header">
+    <main className="app-page admin-page">
+      <header className="app-header admin-page-header">
         <div>
+          <p className="admin-page-header__eyebrow">Administration</p>
           <h1>Student Device Administration</h1>
           <p className="app-header__sub">
             Manage WebAuthn device enrollments. Reset a device to revoke it and

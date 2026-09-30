@@ -469,9 +469,10 @@ export function AdminAttendancePage() {
   const listLoading = sessions === null && listError === null;
 
   return (
-    <main className="app-page">
-      <header className="app-header">
+    <main className="app-page admin-page">
+      <header className="app-header admin-page-header">
         <div>
+          <p className="admin-page-header__eyebrow">Administration</p>
           <h1>Attendance Monitoring</h1>
           <p className="app-header__sub">
             Browse and view attendance sessions across all lecturers.

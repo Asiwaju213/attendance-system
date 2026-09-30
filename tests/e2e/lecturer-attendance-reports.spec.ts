@@ -8,6 +8,7 @@ import {
   E2E_STUDENT,
 } from "./constants";
 import {
+  acquireE2E102RegistrationFixturesLock,
   acquireLecturerReportsFixturesLock,
 } from "./helpers/attendance-fixture-mutex";
 import { withLoginMutex } from "./helpers/login-mutex";
@@ -164,41 +165,41 @@ function makeReport(
 }
 
 async function loginAsMainLecturer(page: Page): Promise<void> {
+  await page.goto("/staff/lecturer/login");
+  await page.getByLabel("Staff ID").fill(E2E_LECTURER.staffId);
+  await page.getByLabel("Password").fill(E2E_LECTURER.password);
   await withLoginMutex("lecturer", async () => {
-    await page.goto("/staff/lecturer/login");
-    await page.getByLabel("Staff ID").fill(E2E_LECTURER.staffId);
-    await page.getByLabel("Password").fill(E2E_LECTURER.password);
     await page.getByRole("button", { name: "Sign in" }).click();
     await expect(page).toHaveURL(/\/app\/lecturer$/, { timeout: 15_000 });
   });
 }
 
 async function loginAsMonitorLecturer(page: Page): Promise<void> {
+  await page.goto("/staff/lecturer/login");
+  await page.getByLabel("Staff ID").fill(E2E_MONITOR_LECTURER.staffId);
+  await page.getByLabel("Password").fill(E2E_MONITOR_LECTURER.password);
   await withLoginMutex("lecturer", async () => {
-    await page.goto("/staff/lecturer/login");
-    await page.getByLabel("Staff ID").fill(E2E_MONITOR_LECTURER.staffId);
-    await page.getByLabel("Password").fill(E2E_MONITOR_LECTURER.password);
     await page.getByRole("button", { name: "Sign in" }).click();
     await expect(page).toHaveURL(/\/app\/lecturer$/, { timeout: 15_000 });
   });
 }
 
 async function loginAsStudent(page: Page): Promise<void> {
+  await page.goto("/login");
+  await page.getByLabel("Matric Number").fill(E2E_STUDENT.matricNumber);
+  await page.getByLabel("Password").fill(E2E_STUDENT.password);
   await withLoginMutex("student", async () => {
-    await page.goto("/login");
-    await page.getByLabel("Matric Number").fill(E2E_STUDENT.matricNumber);
-    await page.getByLabel("Password").fill(E2E_STUDENT.password);
     await page.getByRole("button", { name: "Sign in" }).click();
     await expect(page).toHaveURL(/\/app\/student$/, { timeout: 15_000 });
   });
 }
 
 async function loginAsAdmin(page: Page): Promise<void> {
+  await page.goto("/staff/admin/login");
+  await page.getByLabel("Username").fill(E2E_ADMIN.username);
+  await page.getByLabel("Password").waitFor({ state: "visible", timeout: 15_000 });
+  await page.getByLabel("Password").fill(E2E_ADMIN.password);
   await withLoginMutex("admin", async () => {
-    await page.goto("/staff/admin/login");
-    await page.getByLabel("Username").fill(E2E_ADMIN.username);
-    await page.getByLabel("Password").waitFor({ state: "visible", timeout: 15_000 });
-    await page.getByLabel("Password").fill(E2E_ADMIN.password);
     await page.getByRole("button", { name: "Sign in" }).click();
     await expect(page).toHaveURL(/\/app\/admin$/, { timeout: 15_000 });
   });
@@ -849,13 +850,19 @@ test("the report endpoint enforces lecturer ownership server-side", async ({
   expect(offeringTwo).toBeDefined();
   const offeringTwoId = offeringTwo!.id;
 
-  const ownerRes = await monitorPage.request.get(
-    `/api/lecturer/attendance-reports/course-offering/${offeringTwoId}`
-  );
-  expect(ownerRes.status()).toBe(200);
-  const ownerPayload = (await ownerRes.json()) as MockReportPayload;
-  expect(ownerPayload.data.courseOffering.courseCode).toBe(E2E_COURSE_CODE_TWO);
-  expect(ownerPayload.data.students).toHaveLength(0);
+  const releaseRegistrationLock =
+    await acquireE2E102RegistrationFixturesLock();
+  try {
+    const ownerRes = await monitorPage.request.get(
+      `/api/lecturer/attendance-reports/course-offering/${offeringTwoId}`
+    );
+    expect(ownerRes.status()).toBe(200);
+    const ownerPayload = (await ownerRes.json()) as MockReportPayload;
+    expect(ownerPayload.data.courseOffering.courseCode).toBe(E2E_COURSE_CODE_TWO);
+    expect(ownerPayload.data.students).toHaveLength(0);
+  } finally {
+    await releaseRegistrationLock();
+  }
 
   const mainContext = await browser.newContext();
   const mainPage = await mainContext.newPage();

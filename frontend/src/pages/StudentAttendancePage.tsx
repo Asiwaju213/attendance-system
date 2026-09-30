@@ -137,9 +137,10 @@ export function StudentAttendancePage() {
   }
 
   return (
-    <main className="app-page">
-      <header className="app-header">
-        <div>
+    <main className="app-page attendance-page">
+      <header className="app-header attendance-page-header">
+        <div className="attendance-page-header__copy">
+          <p className="attendance-page-header__eyebrow">Student attendance</p>
           <h1>Attendance</h1>
           <p className="app-header__sub">
             Mark your attendance with your enrolled device.
@@ -159,8 +160,17 @@ export function StudentAttendancePage() {
         </nav>
       </header>
 
-      <section className="app-card app-card--wide" aria-labelledby="eligible-heading">
-        <h2 id="eligible-heading">Sessions to Mark</h2>
+      <section
+        className="app-card app-card--wide attendance-page__section"
+        aria-labelledby="eligible-heading"
+      >
+        <div className="attendance-section__header">
+          <p className="attendance-section__eyebrow">Current attendance</p>
+          <h2 id="eligible-heading">Sessions to Mark</h2>
+          <p className="attendance-section__description">
+            Review an eligible session before confirming your attendance.
+          </p>
+        </div>
 
         {confirmation !== null ? (
           <p className="mark-confirmation" role="status">
@@ -170,66 +180,101 @@ export function StudentAttendancePage() {
         ) : null}
 
         {sessions === null && loadError === null ? (
-          <p className="inline-status" role="status">
-            Loading attendance sessions…
-          </p>
+          <div className="attendance-state-card attendance-state-card--loading">
+            <div className="attendance-skeleton" aria-hidden="true">
+              <span />
+              <span />
+              <span />
+            </div>
+            <p className="inline-status" role="status">
+              Loading attendance sessions…
+            </p>
+          </div>
         ) : null}
 
         {loadError !== null ? (
-          <div className="resource-error">
-            <FormError message={loadError} />
-            <button
-              type="button"
-              className="secondary-button"
-              onClick={() => setReloadKey((key) => key + 1)}
-            >
-              Retry
-            </button>
+          <div className="attendance-state-card attendance-state-card--error">
+            <p className="attendance-state-card__title">Unable to load attendance</p>
+            <div className="resource-error">
+              <FormError message={loadError} />
+              <button
+                type="button"
+                className="secondary-button"
+                onClick={() => setReloadKey((key) => key + 1)}
+              >
+                Retry
+              </button>
+            </div>
           </div>
         ) : null}
 
         {sessions !== null && sessions.length === 0 ? (
-          <p className="inline-status">
-            No attendance sessions are currently available.
-          </p>
+          <div className="attendance-state-card attendance-state-card--empty">
+            <p className="attendance-state-card__title">No sessions available</p>
+            <p className="inline-status" role="status">
+              No attendance sessions are currently available.
+            </p>
+          </div>
         ) : null}
 
         {sessions !== null && sessions.length > 0 ? (
           <>
-            {markError !== null ? <FormError message={markError} /> : null}
-            <ul className="session-list">
+            {markError !== null ? (
+              <div className="resource-error attendance-mark-error">
+                <FormError message={markError} />
+              </div>
+            ) : null}
+            <ul className="session-list attendance-session-list">
               {sessions.map((session) => (
-                <li key={session.id} className="session-list__item">
-                  <p className="session-list__title">
-                    {session.courseCode} — {session.courseTitle}
-                  </p>
-                  <p className="session-list__meta">
-                    {session.attendanceNetworkName} · {session.locationName}
-                  </p>
-                  <p className="session-list__meta">
-                    {formatDateTime(session.startTime)} –{" "}
-                    {formatDateTime(session.endTime)}
-                  </p>
-                  <p className="session-list__meta">
-                    Late threshold: {session.lateThresholdMinutes} minutes
-                  </p>
+                <li
+                  key={session.id}
+                  className="session-list__item attendance-session-card"
+                >
+                  <div className="attendance-session-card__header">
+                    <div className="attendance-session-card__heading">
+                      <p className="attendance-session-card__code">
+                        {session.courseCode}
+                      </p>
+                      <h3 className="session-list__title attendance-session-card__title">
+                        {session.courseTitle}
+                      </h3>
+                    </div>
 
-                  {session.currentAttendanceState === "PRESENT" ? (
-                    <p className="attendance-state attendance-state--present">
-                      Present
+                    {session.currentAttendanceState === "PRESENT" ? (
+                      <p className="attendance-state attendance-state--present">
+                        Present
+                      </p>
+                    ) : null}
+                    {session.currentAttendanceState === "LATE" ? (
+                      <p className="attendance-state attendance-state--late">
+                        Late
+                      </p>
+                    ) : null}
+                    {session.currentAttendanceState === "NOT_MARKED" ? (
+                      <p className="attendance-state attendance-state--not-marked">
+                        Not marked
+                      </p>
+                    ) : null}
+                  </div>
+
+                  <div className="attendance-session-card__details">
+                    <p className="session-list__meta">
+                      {session.attendanceNetworkName} · {session.locationName}
                     </p>
-                  ) : null}
-                  {session.currentAttendanceState === "LATE" ? (
-                    <p className="attendance-state attendance-state--late">
-                      Late
+                    <p className="session-list__meta">
+                      {formatDateTime(session.startTime)} –{" "}
+                      {formatDateTime(session.endTime)}
                     </p>
-                  ) : null}
+                    <p className="session-list__meta">
+                      Late threshold: {session.lateThresholdMinutes} minutes
+                    </p>
+                  </div>
 
                   {session.currentAttendanceState === "NOT_MARKED" ? (
-                    <div className="session-mark">
+                    <div className="session-mark attendance-session-card__action">
                       <button
                         type="button"
-                        className="auth-submit"
+                        className="auth-submit attendance-mark-button"
                         aria-label={`Mark attendance for ${session.courseCode}`}
                         disabled={markingSessionId !== null}
                         aria-busy={markingSessionId === session.id}
@@ -239,6 +284,9 @@ export function StudentAttendancePage() {
                           ? "Verifying…"
                           : "Mark attendance"}
                       </button>
+                      <p className="attendance-action-note">
+                        Your enrolled device will verify this attendance.
+                      </p>
                     </div>
                   ) : null}
                 </li>

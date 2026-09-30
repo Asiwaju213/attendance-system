@@ -279,9 +279,10 @@ export function AdminAcademicPeriodsPage() {
   const semestersLoading = semesters === null && semestersError === null;
 
   return (
-    <main className="app-page">
-      <header className="app-header">
+    <main className="app-page admin-page">
+      <header className="app-header admin-page-header">
         <div>
+          <p className="admin-page-header__eyebrow">Administration</p>
           <h1>Academic Sessions &amp; Semesters</h1>
           <p className="app-header__sub">
             Manage the active academic session and the two supported semesters.

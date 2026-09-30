@@ -1,4 +1,8 @@
 import { defineConfig, devices } from "@playwright/test";
+import { testEnvironment } from "./tests/e2e/test-environment";
+
+const e2eEnvironment = testEnvironment();
+Object.assign(process.env, e2eEnvironment);
 
 export default defineConfig({
   testDir: "./tests/e2e",
@@ -31,10 +35,11 @@ export default defineConfig({
       timeout: 120_000,
     },
     {
-      command: "npm run dev",
+      command: "npm run test:db:prepare && npm run migrate && npm run dev",
       cwd: "backend",
+      env: e2eEnvironment,
       url: "http://localhost:5000/api/health",
-      reuseExistingServer: !process.env.CI,
+      reuseExistingServer: false,
       timeout: 120_000,
     },
   ],

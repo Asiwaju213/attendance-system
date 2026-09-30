@@ -5,12 +5,9 @@ export function StaffLoginPage() {
   return (
     <AuthShell
       title="Staff Login"
+      eyebrow="Staff Access"
+      description="Lecturer and administrator sign-in for the OOU Attendance System."
       subtitle="Choose how you would like to sign in."
-      footer={
-        <>
-          <Link to="/login">Student login</Link>
-        </>
-      }
     >
       <nav className="staff-choice" aria-label="Staff login options">
         <Link className="staff-choice__link" to="/staff/lecturer/login">

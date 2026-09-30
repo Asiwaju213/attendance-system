@@ -1,7 +1,9 @@
 import { Router } from "express";
 import { requireAuth, requireStudent } from "../middleware/authenticate";
+import { authConfig, clearDeviceBindingCookieOptions } from "../config/auth";
 import {
   completeDeviceEnrollment,
+  getStudentDeviceStatus,
   startDeviceEnrollment,
 } from "../services/studentDeviceEnrollmentService";
 import { parseCompleteDeviceEnrollment } from "../validation/studentDeviceValidation";
@@ -9,6 +11,49 @@ import { parseCompleteDeviceEnrollment } from "../validation/studentDeviceValida
 const router = Router();
 
 router.use(requireAuth, requireStudent);
+
+// ------------------------------------------------------------------
+// GET /api/student/device
+// Read-only report of the student's current device state, so the UI can
+// render the right state without starting a ceremony.
+//
+// This endpoint is intentionally side-effect free: it creates, consumes and
+// expires no challenge, writes no device row, and does not touch the
+// attendance challenge. In particular it must never be implemented in terms
+// of the enrollment-options endpoint below, which issues a challenge and
+// expires the student's existing one.
+// ------------------------------------------------------------------
+router.get("/device", async (req, res) => {
+  try {
+    const result = await getStudentDeviceStatus(req.user!.id);
+
+    if (!result.ok) {
+      return res.status(404).json({
+        error: "STUDENT_NOT_FOUND",
+        message: "The authenticated user does not belong to a student profile.",
+      });
+    }
+
+    res.status(200).json({
+      enrollmentMode: result.state,
+      // Reported as stored: null means "unknown", which is every device enrolled before the
+      // discoverability column existed. It is treated as needing an upgrade, exactly like the
+      // login gate treats it.
+      discoverable: result.discoverable,
+      // No credential id, public key, counter or AAGUID is exposed: the student UI needs none
+      // of them, and they are credential internals.
+      device: result.device
+        ? { enrolledAt: result.device.enrolledAt, label: result.device.label }
+        : null,
+    });
+  } catch (error) {
+    console.error("Device status error.", (error as Error).message);
+    res.status(500).json({
+      error: "INTERNAL_ERROR",
+      message: "An unexpected error occurred while fetching the device status.",
+    });
+  }
+});
 
 // ------------------------------------------------------------------
 // POST /api/student/device/enrollment/options
@@ -35,7 +80,12 @@ router.post("/device/enrollment/options", async (req, res) => {
       }
     }
 
-    res.status(200).json({ data: result.options });
+    // `enrollmentMode` is additive: existing clients that ignore it are unaffected. It tells the
+    // caller whether this is a first enrollment or an authenticated upgrade of a legacy
+    // non-discoverable credential, so the UI can label the ceremony accurately.
+    res
+      .status(200)
+      .json({ data: result.options, enrollmentMode: result.mode });
   } catch (error) {
     console.error("Device enrollment options error.", (error as Error).message);
     res.status(500).json({
@@ -100,8 +150,23 @@ router.post("/device/enrollment/complete", async (req, res) => {
       }
     }
 
+    // Set the device-binding cookie so this device is bound to this student
+    // for password-only returning login. The cookie stores the credential ID
+    // and is HTTP-only, Secure, SameSite=Lax with a 90-day lifetime.
+    res.cookie(
+      authConfig.deviceBindingCookieName,
+      result.credentialId,
+      authConfig.deviceBindingCookie
+    );
+
     res.status(201).json({
       credentialId: result.credentialId,
+      // Present only for an upgrade, and always null otherwise. The old credential row is
+      // REVOKED, not deleted.
+      replacedCredentialId: result.replacedCredentialId,
+      // False means the authenticator ignored `residentKey: "required"`. The credential is
+      // still usable for attendance; the student can run the upgrade again.
+      discoverable: result.discoverable,
       device: result.device,
     });
   } catch (error) {

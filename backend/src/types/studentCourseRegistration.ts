@@ -56,3 +56,24 @@ export interface RegistrationResultPayload {
   registered: RegisteredCourseRef[];
   alreadyRegistered: RegisteredCourseRef[];
 }
+
+export interface StudentCourseRegistration {
+  offeringId: number;
+  courseId: number;
+  courseCode: string;
+  title: string;
+  level: number;
+  scope: CourseScope;
+  department: RegistrationDepartment | null;
+  faculty: RegistrationFaculty | null;
+  semester: RegistrationSemester;
+  academicSession: RegistrationAcademicSession;
+  offeringStatus: "OPEN" | "CLOSED";
+  registrationStatus: "ENROLLED" | "DROPPED" | "COMPLETED";
+  lecturers: RegistrationLecturer[];
+}
+
+export interface StudentRegistrationsPayload {
+  academicSession: RegistrationAcademicSession | null;
+  registrations: StudentCourseRegistration[];
+}

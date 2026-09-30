@@ -53,13 +53,10 @@ export function AdminLoginPage() {
   return (
     <AuthShell
       title="Admin Login"
+      eyebrow="Administrative Access"
+      description="Manage academic structure, users, attendance operations, and reports."
       subtitle="Sign in with your admin username to continue."
-      footer={
-        <>
-          <Link to="/staff/login">Back to staff login</Link>
-          <Link to="/login">Student login</Link>
-        </>
-      }
+      footer={<Link to="/staff/login">Back to staff login</Link>}
     >
       <form onSubmit={handleSubmit} noValidate>
         {formError !== null ? <FormError message={formError} /> : null}

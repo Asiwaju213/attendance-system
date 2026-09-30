@@ -63,6 +63,10 @@ let offeringGST200F2 = 0;
 let offeringGST300 = 0;
 let offeringGST2ND = 0;
 
+let regcNetworkId = 0;
+let regcLocationId = 0;
+let regcAttendanceSessionId = 0;
+
 const ALL_USER_IDS = () => [
   studentAUserId,
   studentBUserId,
@@ -131,6 +135,23 @@ async function hasEnrollment(studentProfileId: number, offeringId: number): Prom
 
 async function cleanupScopedData(): Promise<void> {
   await pool.query(
+    `DELETE FROM attendance_records
+     WHERE session_id IN (
+       SELECT id FROM attendance_sessions
+       WHERE course_offering_id IN (
+         SELECT id FROM course_offerings
+         WHERE course_id IN (SELECT id FROM courses WHERE course_code LIKE 'REGC%')
+       )
+     )`
+  );
+  await pool.query(
+    `DELETE FROM attendance_sessions
+     WHERE course_offering_id IN (
+       SELECT id FROM course_offerings
+       WHERE course_id IN (SELECT id FROM courses WHERE course_code LIKE 'REGC%')
+     )`
+  );
+  await pool.query(
     `DELETE FROM course_registrations
      WHERE course_offering_id IN (
        SELECT id FROM course_offerings
@@ -171,6 +192,8 @@ async function cleanupScopedData(): Promise<void> {
   );
   await pool.query(`DELETE FROM departments WHERE code LIKE 'REGC%'`);
   await pool.query(`DELETE FROM faculties WHERE code LIKE 'REGC%'`);
+  await pool.query(`DELETE FROM attendance_networks WHERE network_code LIKE 'REGC%'`);
+  await pool.query(`DELETE FROM locations WHERE name LIKE 'REGC-LOC%'`);
 }
 
 before(async () => {
@@ -376,6 +399,29 @@ before(async () => {
      VALUES ($1, $2), ($3, $4)`,
     [offeringCSC201, lecturer1ProfileId, offeringGST200, lecturer2ProfileId]
   );
+
+  // Attendance fixture: one ACTIVE session on CSC201 (which student A registers
+  // for during the registration tests) so enrollment -> attendance eligibility
+  // integration can be verified end to end.
+  const network = await pool.query(
+    `INSERT INTO attendance_networks (network_code, name)
+     VALUES ('REGC-NET', 'Regc Network') RETURNING id`
+  );
+  regcNetworkId = Number(network.rows[0].id);
+  const location = await pool.query(
+    `INSERT INTO locations (name) VALUES ('REGC-LOC1') RETURNING id`
+  );
+  regcLocationId = Number(location.rows[0].id);
+  const attendanceSession = await pool.query(
+    `INSERT INTO attendance_sessions
+       (course_offering_id, started_by_lecturer_id, attendance_network_id,
+        location_id, start_time, end_time, late_threshold, status)
+     VALUES ($1, $2, $3, $4, now() - interval '15 minutes',
+             now() + interval '45 minutes', interval '5 minutes', 'ACTIVE')
+     RETURNING id`,
+    [offeringCSC201, lecturer1ProfileId, regcNetworkId, regcLocationId]
+  );
+  regcAttendanceSessionId = Number(attendanceSession.rows[0].id);
 
   server = app.listen(0);
   await new Promise<void>((resolve) => server.once("listening", () => resolve()));
@@ -905,4 +951,186 @@ test("REGC regression: no unregister endpoint is exposed", async () => {
     headers: cookieHeader(token),
   });
   assert.equal(res.status, 404);
+});
+
+// ---------------------------------------------------------------------------
+// Student registrations list (GET /api/student/course-registrations)
+// ---------------------------------------------------------------------------
+
+test("REGC registrations: an unauthenticated request is rejected", async () => {
+  const res = await get("/api/student/course-registrations");
+  assert.equal(res.status, 401);
+  assert.equal((await res.json()).error, "UNAUTHENTICATED");
+});
+
+test("REGC registrations: a lecturer cannot access the student registrations endpoint", async () => {
+  const res = await postJson("/api/auth/lecturer/login", {
+    staffId: "REGC/LEC/1",
+    password: TEST_PASSWORD,
+  });
+  assert.equal(res.status, 200);
+  const token = cookieFrom(res)!;
+
+  const registrations = await get(
+    "/api/student/course-registrations",
+    cookieHeader(token)
+  );
+  assert.equal(registrations.status, 403);
+  assert.equal((await registrations.json()).error, "FORBIDDEN");
+});
+
+type RegRow = {
+  offeringId: number;
+  courseId: number;
+  courseCode: string;
+  title: string;
+  level: number;
+  scope: string;
+  department: { id: number; name: string; code: string } | null;
+  faculty: { id: number; name: string; code: string } | null;
+  semester: { id: number; name: string };
+  academicSession: { id: number; name: string };
+  offeringStatus: string;
+  registrationStatus: string;
+  lecturers: Array<{ id: number; name: string }>;
+};
+
+async function getRegistrations(
+  token: string
+): Promise<{ academicSession: { id: number; name: string }; registrations: RegRow[] }> {
+  const res = await get(
+    "/api/student/course-registrations",
+    cookieHeader(token)
+  );
+  assert.equal(res.status, 200);
+  const body = (await res.json()) as {
+    data: { academicSession: { id: number; name: string }; registrations: RegRow[] };
+  };
+  return body.data;
+}
+
+test("REGC registrations: a student sees their own enrolled courses with full details", async () => {
+  const token = await loginStudent("REGC/STU/A");
+  const data = await getRegistrations(token);
+
+  assert.deepEqual(data.academicSession, {
+    id: activeSessionId,
+    name: "REGC-ACTIVE",
+  });
+
+  const ids = data.registrations
+    .map((r: RegRow) => r.offeringId)
+    .sort((a: number, b: number) => a - b);
+  assert.deepEqual(
+    ids,
+    [offeringCSC201, offeringCSC202, offeringGST200, offeringGST2ND].sort(
+      (a: number, b: number) => a - b
+    )
+  );
+
+  const csc201 = data.registrations.find((r: RegRow) => r.offeringId === offeringCSC201)!;
+  assert.equal(csc201.courseId, courseCSC201Id);
+  assert.equal(csc201.courseCode, "REGC-CSC201");
+  assert.equal(csc201.title, "Data Structures");
+  assert.equal(csc201.level, 200);
+  assert.equal(csc201.scope, "DEPARTMENT");
+  assert.deepEqual(csc201.department, {
+    id: department1Id,
+    name: "Regc Department One",
+    code: "REGC-DEP",
+  });
+  assert.equal(csc201.faculty, null);
+  assert.deepEqual(csc201.semester, { id: firstSemesterId, name: "First Semester" });
+  assert.deepEqual(csc201.academicSession, { id: activeSessionId, name: "REGC-ACTIVE" });
+  assert.equal(csc201.offeringStatus, "OPEN");
+  assert.equal(csc201.registrationStatus, "ENROLLED");
+  assert.deepEqual(csc201.lecturers, [
+    { id: lecturer1ProfileId, name: "Regc Lecturer One" },
+  ]);
+
+  const gst2nd = data.registrations.find((r: RegRow) => r.offeringId === offeringGST2ND)!;
+  assert.deepEqual(gst2nd.semester, { id: secondSemesterId, name: "Second Semester" });
+  assert.deepEqual(gst2nd.lecturers, []);
+});
+
+test("REGC registrations: registrations are isolated per student", async () => {
+  // Student B has never registered for anything.
+  const tokenB = await loginStudent("REGC/STU/B");
+  const dataB = await getRegistrations(tokenB);
+  assert.deepEqual(dataB.registrations, []);
+
+  // Student C sees only their own two enrollments, never student A's courses.
+  const tokenC = await loginStudent("REGC/STU/C");
+  const dataC = await getRegistrations(tokenC);
+  const idsC = dataC.registrations
+    .map((r: RegRow) => r.offeringId)
+    .sort((a: number, b: number) => a - b);
+  assert.deepEqual(idsC, [offeringCSC202, offeringGST200].sort((a: number, b: number) => a - b));
+  const offeringIdsC = new Set(idsC);
+  assert.ok(!offeringIdsC.has(offeringGST2ND), "student A's GST2ND must not leak to C");
+  assert.ok(!offeringIdsC.has(offeringCSC201), "student A's CSC201 must not leak to C");
+});
+
+test("REGC registrations: a new enrollment appears in the list immediately", async () => {
+  const token = await loginStudent("REGC/STU/B");
+  const res = await postJson(
+    "/api/student/registration/courses",
+    { offeringIds: [offeringB200] },
+    cookieHeader(token)
+  );
+  assert.equal(res.status, 201);
+
+  const data = await getRegistrations(token);
+  const ids = data.registrations.map((r: RegRow) => r.offeringId);
+  assert.deepEqual(ids, [offeringB200]);
+  assert.equal(data.registrations[0].courseCode, "REGC-BUS200");
+});
+
+test("REGC registrations: registrations outside the active session are not listed", async () => {
+  const token = await loginStudent("REGC/STU/B");
+  // A previous-session enrollment exists in the database, but it must not appear
+  // in the current-session registrations list.
+  await pool.query(
+    `INSERT INTO course_registrations (student_id, course_offering_id)
+     VALUES ($1, $2)`,
+    [studentBProfileId, offeringCSC201Old]
+  );
+
+  const data = await getRegistrations(token);
+  const ids = data.registrations.map((r: RegRow) => r.offeringId);
+  assert.deepEqual(ids, [offeringB200], "old-session registrations must not be listed");
+});
+
+// ---------------------------------------------------------------------------
+// Attendance integration
+// ---------------------------------------------------------------------------
+
+test("REGC integration: an enrolled student becomes eligible for the offering's attendance session", async () => {
+  const token = await loginStudent("REGC/STU/A");
+  const res = await get("/api/student/attendance/eligible", cookieHeader(token));
+  assert.equal(res.status, 200);
+  const body = (await res.json()) as {
+    data: Array<{ id: number; courseOfferingId: number }>;
+  };
+
+  const offeringIds = body.data.map((s) => s.courseOfferingId);
+  assert.deepEqual(
+    offeringIds.sort((a: number, b: number) => a - b),
+    [offeringCSC201],
+    "the enrolled student must see the active attendance session for CSC201"
+  );
+  assert.equal(body.data[0].id, regcAttendanceSessionId);
+});
+
+test("REGC integration: a student without the enrollment cannot see the attendance session", async () => {
+  const token = await loginStudent("REGC/STU/B");
+  const res = await get("/api/student/attendance/eligible", cookieHeader(token));
+  assert.equal(res.status, 200);
+  const body = (await res.json()) as { data: Array<{ courseOfferingId: number }> };
+
+  const offeringIds = body.data.map((s) => s.courseOfferingId);
+  assert.ok(
+    !offeringIds.includes(offeringCSC201),
+    "an unregistered student must not see CSC201's session"
+  );
 });

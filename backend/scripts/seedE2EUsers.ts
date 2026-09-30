@@ -1,4 +1,5 @@
 import { pool } from "../src/db/pool";
+import { getTestDatabaseName } from "../src/config/testDatabase";
 import { hashPassword } from "../src/lib/passwords";
 
 export const E2E_PASSWORD = "auth-flow-test-password";
@@ -27,6 +28,38 @@ const E2E_STUDENT_MATRICS = [
   "E2E/STU/0001",
   "E2E/STU/0002",
   "E2E/STU/0003",
+] as const;
+
+const E2E_STUDENT_PENDING_MATRIC = "E2E/STU/0004";
+const E2E_STUDENT_NO_COURSES_MATRIC = "E2E/STU/0005";
+
+// Dedicated students for the admin student-management spec. They are kept out
+// of E2E_STUDENT_MATRICS so no E2E course is auto-enrolled for them, and their
+// status is mutated by the admin-student-management tests without disturbing
+// the shared E2E students used by the parallel E2E specs.
+const E2E_STUDENT_ACTIVE_MANAGEMENT_MATRIC = "E2E/STU/0010";
+const E2E_STUDENT_INACTIVE_MANAGEMENT_MATRIC = "E2E/STU/0011";
+const E2E_STUDENT_PENDING_MANAGEMENT_MATRIC = "E2E/STU/0012";
+const E2E_STUDENT_RESET_MANAGEMENT_MATRIC = "E2E/STU/0013";
+
+// Status overrides for E2E student users. Everything defaults to ACTIVE.
+const STUDENT_SEED_STATUSES: Record<string, "ACTIVE" | "INACTIVE" | "PENDING"> = {
+  [E2E_STUDENT_PENDING_MATRIC]: "PENDING",
+  [E2E_STUDENT_INACTIVE_MANAGEMENT_MATRIC]: "INACTIVE",
+  [E2E_STUDENT_PENDING_MANAGEMENT_MATRIC]: "PENDING",
+};
+
+// Matric numbers the admin student-import spec creates through the import flow
+// itself (they are never seeded directly). Keeping them in the cleanup list
+// lets the next seed run remove any rows a previous run left behind, including
+// after a failed import test.
+const E2E_IMPORT_MATRICS = [
+  "E2E/IMP/0001",
+  "E2E/IMP/0002",
+  "E2E/IMP/0003",
+  "E2E/IMP/0501",
+  "E2E/IMP/0502",
+  "E2E/IMP/0503",
 ] as const;
 
 const E2E_COURSE_CODES = [
@@ -63,6 +96,48 @@ const E2E_USERS: E2EUser[] = [
     role: "STUDENT",
     username: null,
     matricNumber: "E2E/STU/0003",
+    staffId: null,
+  },
+  {
+    name: "E2E Student Pending",
+    role: "STUDENT",
+    username: null,
+    matricNumber: E2E_STUDENT_PENDING_MATRIC,
+    staffId: null,
+  },
+  {
+    name: "E2E Student No Courses",
+    role: "STUDENT",
+    username: null,
+    matricNumber: E2E_STUDENT_NO_COURSES_MATRIC,
+    staffId: null,
+  },
+  {
+    name: "E2E Active Management",
+    role: "STUDENT",
+    username: null,
+    matricNumber: E2E_STUDENT_ACTIVE_MANAGEMENT_MATRIC,
+    staffId: null,
+  },
+  {
+    name: "E2E Inactive Management",
+    role: "STUDENT",
+    username: null,
+    matricNumber: E2E_STUDENT_INACTIVE_MANAGEMENT_MATRIC,
+    staffId: null,
+  },
+  {
+    name: "E2E Pending Management",
+    role: "STUDENT",
+    username: null,
+    matricNumber: E2E_STUDENT_PENDING_MANAGEMENT_MATRIC,
+    staffId: null,
+  },
+  {
+    name: "E2E Reset Management",
+    role: "STUDENT",
+    username: null,
+    matricNumber: E2E_STUDENT_RESET_MANAGEMENT_MATRIC,
     staffId: null,
   },
   {
@@ -105,7 +180,16 @@ async function findE2EUserIds(): Promise<number[]> {
          OR l.staff_id = ANY($2::TEXT[])
          OR u.username = $3`,
     [
-      E2E_STUDENT_MATRICS,
+      [
+        ...E2E_STUDENT_MATRICS,
+        E2E_STUDENT_PENDING_MATRIC,
+        E2E_STUDENT_NO_COURSES_MATRIC,
+        E2E_STUDENT_ACTIVE_MANAGEMENT_MATRIC,
+        E2E_STUDENT_INACTIVE_MANAGEMENT_MATRIC,
+        E2E_STUDENT_PENDING_MANAGEMENT_MATRIC,
+        E2E_STUDENT_RESET_MANAGEMENT_MATRIC,
+        ...E2E_IMPORT_MATRICS,
+      ],
       [
         E2E_LECTURER_STAFF_ID,
         E2E_MONITOR_LECTURER_STAFF_ID,
@@ -117,7 +201,70 @@ async function findE2EUserIds(): Promise<number[]> {
   return result.rows.map((row) => Number(row.id));
 }
 
+async function assertTestDatabaseIdentity(): Promise<void> {
+  const expectedDatabaseName = getTestDatabaseName();
+  if (
+    process.env.NODE_ENV !== "test" ||
+    process.env.DATABASE_NAME !== expectedDatabaseName
+  ) {
+    throw new Error(
+      `Refusing E2E seed/cleanup: expected test database "${expectedDatabaseName}".`
+    );
+  }
+
+  const identity = await pool.query(
+    "SELECT current_database() AS database_name"
+  );
+  const actualDatabaseName = identity.rows[0]?.database_name;
+  if (actualDatabaseName !== expectedDatabaseName) {
+    throw new Error(
+      `Refusing E2E seed/cleanup: connected to "${actualDatabaseName}".`
+    );
+  }
+}
+
+async function resetCourseRegistrations(courseCode: string): Promise<number> {
+  await assertTestDatabaseIdentity();
+  const client = await pool.connect();
+
+  try {
+    await client.query("BEGIN");
+    await client.query(
+      `DELETE FROM audit_logs
+       WHERE entity_type = 'course_registrations'
+         AND entity_id IN (
+           SELECT id FROM course_registrations
+           WHERE course_offering_id IN (
+             SELECT id FROM course_offerings
+             WHERE course_id IN (
+               SELECT id FROM courses WHERE course_code = $1
+             )
+           )
+         )`,
+      [courseCode]
+    );
+    const result = await client.query(
+      `DELETE FROM course_registrations
+       WHERE course_offering_id IN (
+         SELECT id FROM course_offerings
+         WHERE course_id IN (
+           SELECT id FROM courses WHERE course_code = $1
+         )
+       )`,
+      [courseCode]
+    );
+    await client.query("COMMIT");
+    return result.rowCount ?? 0;
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => undefined);
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
 async function cleanup(): Promise<void> {
+  await assertTestDatabaseIdentity();
   const userIds = await findE2EUserIds();
 
   if (userIds.length > 0) {
@@ -189,12 +336,21 @@ async function cleanup(): Promise<void> {
     await pool.query(`DELETE FROM academic_sessions WHERE name = $1`, [
       E2E_ACADEMIC_SESSION_NAME,
     ]);
+    await pool.query(
+      `DELETE FROM student_registration_challenges WHERE user_id = ANY($1::BIGINT[])`,
+      [userIds]
+    );
     await pool.query(`DELETE FROM sessions WHERE user_id = ANY($1::BIGINT[])`, [userIds]);
     await pool.query(`DELETE FROM students WHERE user_id = ANY($1::BIGINT[])`, [userIds]);
     await pool.query(`DELETE FROM lecturers WHERE user_id = ANY($1::BIGINT[])`, [userIds]);
     await pool.query(`DELETE FROM users WHERE id = ANY($1::BIGINT[])`, [userIds]);
   }
 
+  await pool.query(
+    `DELETE FROM student_import_previews
+     WHERE department_id = (SELECT id FROM departments WHERE code = $1)`,
+    [E2E_DEPARTMENT_CODE]
+  );
   await pool.query(`DELETE FROM attendance_networks WHERE network_code = $1`, [
     E2E_NETWORK_CODE,
   ]);
@@ -232,26 +388,47 @@ async function seed(): Promise<void> {
   }
   const levelId = Number(levels.rows[0].id);
 
+  const level300 = await pool.query(`SELECT id FROM levels WHERE name = 300`);
+  if (level300.rowCount === 0) {
+    throw new Error("Level 300 not found. Run `npm run migrate` first.");
+  }
+  const level300Id = Number(level300.rows[0].id);
+
   const passwordHash = await hashPassword(E2E_PASSWORD);
 
   const lecturerProfileIds = new Map<string, number>();
   const studentProfileIds = new Map<string, number>();
 
   for (const user of E2E_USERS) {
+    const studentSeedStatus =
+      user.role === "STUDENT" && user.matricNumber !== null
+        ? (STUDENT_SEED_STATUSES[user.matricNumber] ?? "ACTIVE")
+        : "ACTIVE";
+    const isPendingStudent = studentSeedStatus === "PENDING";
     const inserted = await pool.query(
       `INSERT INTO users (name, password_hash, role, status, username)
-       VALUES ($1, $2, $3, 'ACTIVE', $4)
+       VALUES ($1, $2, $3, $4, $5)
        RETURNING id`,
-      [user.name, passwordHash, user.role, user.username]
+      [
+        user.name,
+        isPendingStudent ? null : passwordHash,
+        user.role,
+        isPendingStudent ? "PENDING" : studentSeedStatus,
+        user.username,
+      ]
     );
     const userId = Number(inserted.rows[0].id);
 
     if (user.role === "STUDENT" && user.matricNumber !== null) {
+      const studentLevelId =
+        user.matricNumber === E2E_STUDENT_NO_COURSES_MATRIC
+          ? level300Id
+          : levelId;
       const student = await pool.query(
         `INSERT INTO students (user_id, matric_number, department_id, level_id)
          VALUES ($1, $2, $3, $4)
          RETURNING id`,
-        [userId, user.matricNumber, departmentId, levelId]
+        [userId, user.matricNumber, departmentId, studentLevelId]
       );
       studentProfileIds.set(user.matricNumber, Number(student.rows[0].id));
     } else if (user.role === "LECTURER" && user.staffId !== null) {
@@ -611,9 +788,29 @@ async function seed(): Promise<void> {
 
 async function main(): Promise<void> {
   const cleanupOnly = process.argv.includes("--cleanup");
+  const resetPrefix = "--reset-course-registrations=";
+  const resetArgument = process.argv.find((argument) =>
+    argument.startsWith(resetPrefix)
+  );
+  const resetCourseCode = resetArgument?.slice(resetPrefix.length);
+
+  if (cleanupOnly && resetCourseCode) {
+    throw new Error("Choose either E2E cleanup or a course-registration reset.");
+  }
+  if (
+    resetCourseCode &&
+    !E2E_COURSE_CODES.some((courseCode) => courseCode === resetCourseCode)
+  ) {
+    throw new Error(`Refusing to reset non-E2E course: "${resetCourseCode}".`);
+  }
 
   try {
-    if (cleanupOnly) {
+    if (resetCourseCode) {
+      const removed = await resetCourseRegistrations(resetCourseCode);
+      console.log(
+        `Reset ${removed} course registration(s) for ${resetCourseCode}.`
+      );
+    } else if (cleanupOnly) {
       await cleanup();
       console.log("Removed E2E authentication users.");
     } else {

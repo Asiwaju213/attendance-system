@@ -1,6 +1,11 @@
 import dotenv from "dotenv";
+import { assertTestDatabaseEnvironment } from "./testDatabase";
 
 dotenv.config();
+
+if (process.env.NODE_ENV === "test") {
+  assertTestDatabaseEnvironment();
+}
 
 function requireEnv(name: string): string {
   const value = process.env[name];

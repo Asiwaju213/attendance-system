@@ -10,18 +10,23 @@ import { AdminAttendancePage } from "../pages/AdminAttendancePage";
 import { AdminAttendanceReportsPage } from "../pages/AdminAttendanceReportsPage";
 import { AdminAcademicPeriodsPage } from "../pages/AdminAcademicPeriodsPage";
 import { AdminStudentDevicesPage } from "../pages/AdminStudentDevicesPage";
+import { AdminStudentsPage } from "../pages/AdminStudentsPage";
+import { AdminStudentImportPage } from "../pages/AdminStudentImportPage";
+import { AdminCourseOfferingsPage } from "../pages/AdminCourseOfferingsPage";
+import { AdminCourseOfferingRosterPage } from "../pages/AdminCourseOfferingRosterPage";
+import { AdminCoursesPage } from "../pages/AdminCoursesPage";
 import { LecturerHomePage } from "../pages/LecturerHomePage";
 import { LecturerAttendancePage } from "../pages/LecturerAttendancePage";
 import { LecturerAttendanceReportsPage } from "../pages/LecturerAttendanceReportsPage";
 import { LecturerSessionAttendanceReportPage } from "../pages/LecturerSessionAttendanceReportPage";
 import { LecturerLoginPage } from "../pages/LecturerLoginPage";
-import { NetworkTestPage } from "../pages/NetworkTestPage";
 import { NotFoundPage } from "../pages/NotFoundPage";
 import { StaffLoginPage } from "../pages/StaffLoginPage";
 import { StudentHomePage } from "../pages/StudentHomePage";
 import { StudentAttendancePage } from "../pages/StudentAttendancePage";
 import { StudentAttendanceHistoryPage } from "../pages/StudentAttendanceHistoryPage";
 import { StudentDevicePage } from "../pages/StudentDevicePage";
+import { StudentCourseRegistrationPage } from "../pages/StudentCourseRegistrationPage";
 import { StudentLoginPage } from "../pages/StudentLoginPage";
 import { StudentRegisterPage } from "../pages/StudentRegisterPage";
 
@@ -64,8 +69,6 @@ export function AppRoutes() {
     <BrowserRouter>
       <Routes>
         <Route path="/" element={<RootRedirect />} />
-        {/* TEMPORARY network investigation page — remove with NetworkTestPage. */}
-        <Route path="/network-test" element={<NetworkTestPage />} />
         <Route
           path="/login"
           element={
@@ -139,6 +142,22 @@ export function AppRoutes() {
           }
         />
         <Route
+          path="/app/student/registration"
+          element={
+            <ProtectedRoute role="STUDENT">
+              <StudentCourseRegistrationPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/app/student/courses"
+          element={
+            <ProtectedRoute role="STUDENT">
+              <StudentCourseRegistrationPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
           path="/app/lecturer"
           element={
             <ProtectedRoute role="LECTURER">
@@ -207,6 +226,46 @@ export function AppRoutes() {
           element={
             <ProtectedRoute role="ADMIN">
               <AdminStudentDevicesPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/app/admin/students"
+          element={
+            <ProtectedRoute role="ADMIN">
+              <AdminStudentsPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/app/admin/students/import"
+          element={
+            <ProtectedRoute role="ADMIN">
+              <AdminStudentImportPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/app/admin/courses"
+          element={
+            <ProtectedRoute role="ADMIN">
+              <AdminCoursesPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/app/admin/course-offerings"
+          element={
+            <ProtectedRoute role="ADMIN">
+              <AdminCourseOfferingsPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/app/admin/course-offerings/:id/roster"
+          element={
+            <ProtectedRoute role="ADMIN">
+              <AdminCourseOfferingRosterPage />
             </ProtectedRoute>
           }
         />
