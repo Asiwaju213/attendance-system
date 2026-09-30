@@ -1,4 +1,5 @@
 import express, { NextFunction, Request, Response } from "express";
+import { applyTrustProxy } from "./config/trustProxy";
 import { pool } from "./db/pool";
 import adminAcademicSessionsRouter from "./routes/adminAcademicSessions";
 import adminAttendanceNetworksRouter from "./routes/adminAttendanceNetworks";
@@ -24,6 +25,10 @@ import studentDeviceRouter from "./routes/studentDevice";
 import studentRegistrationRouter from "./routes/studentRegistration";
 
 export const app = express();
+
+// Before any middleware or route can read `req.ip`. Exactly one reverse-proxy
+// hop (Vercel's edge) is trusted; see config/trustProxy.ts.
+applyTrustProxy(app);
 
 app.use(express.json());
 

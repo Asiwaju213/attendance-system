@@ -2,8 +2,13 @@
   "name": "oou-attendance-system",
   "version": "1.0.0",
   "private": true,
-  "description": "End-to-end testing for the OOU Attendance System",
+  "description": "OOU Attendance System: npm workspace root (frontend, backend) and end-to-end testing",
+  "workspaces": [
+    "frontend",
+    "backend"
+  ],
   "scripts": {
+    "build": "npm run build --workspace backend && npm run build --workspace frontend",
     "test:e2e": "playwright test",
     "test:e2e:headed": "playwright test --headed",
     "test:e2e:ui": "playwright test --ui",

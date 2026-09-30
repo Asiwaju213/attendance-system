@@ -28,6 +28,9 @@ npm-debug.log*
 # Coverage
 coverage/
 
+# Vercel (created by `vercel link`, contains local project metadata)
+.vercel/
+
 # Playwright
 /test-results/
 /playwright-report/

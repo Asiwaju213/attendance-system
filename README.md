@@ -20,7 +20,7 @@ attendance-system/
 ├── frontend/          # React + TypeScript client application
 ├── backend/           # Express.js + TypeScript API server
 ├── database/          # Database schemas and migrations (coming soon)
-├── docs/              # Project documentation
+├── docs/              # Project documentation (see docs/lan-mode.md)
 ├── tests/e2e/         # Playwright end-to-end browser tests
 ├── playwright.config.ts
 ├── package.json       # Root package.json (E2E test scripts)
@@ -72,7 +72,35 @@ cd backend
 npm run dev
 ```
 
-The backend will start on `http://localhost:5000`. It uses `tsx watch` to automatically restart when source files change. The backend loads its PostgreSQL credentials from the `.env` file in the `backend/` directory.
+The backend will start on `http://localhost:5000`. It uses `tsx watch` to automatically restart when source files change. The backend loads its PostgreSQL credentials from the `.env` file in the `backend/` directory. The interface it listens on is configurable with the optional `HOST` and `PORT` variables (see [Running on the local network](#running-on-the-local-network-lan-mode)).
+
+### Running on the local network (LAN mode)
+
+To let a phone on the local router's Wi-Fi load the app, set the server host to a network interface in each project's `.env`:
+
+```ini
+# backend/.env
+HOST=0.0.0.0
+PORT=5000
+```
+
+```ini
+# frontend/.env (copy .env.example first)
+VITE_DEV_HOST=0.0.0.0
+VITE_DEV_PORT=4173
+VITE_API_PROXY_TARGET=http://127.0.0.1:5000
+```
+
+The device then opens `http://<the PC's LAN address>:<VITE_DEV_PORT>`. The browser always requests the relative path `/api/...`, which the Vite dev server proxies to the backend, so requests stay same-origin — no CORS policy is involved and the HTTP-only session cookies keep working. Read the LAN address from the machine (`ipconfig`); it is never hard-coded in application source.
+
+Both settings default to loopback (`127.0.0.1`), so normal local development and cloud deployment are unaffected.
+
+> **LAN mode only makes the application listen on the local network. It does not configure Windows routing, Internet Connection Sharing, NAT, or firewall rules.**
+
+Student passkey features (device enrollment, passkey login, attendance device verification) do **not** work from a plain-HTTP LAN address. Three independent browser rules each block it: WebAuthn needs a secure context, the RP ID must be a real registrable domain (not an IP address and not a `.local` name), and Chrome has refused WebAuthn on untrusted certificates since Chrome 110. Every other flow works from a phone, because it authenticates with the session cookie.
+
+See [`docs/lan-mode.md`](docs/lan-mode.md) for the traffic paths, the configuration switches, and the manual network-side steps. See [`docs/lan-https-webauthn.md`](docs/lan-https-webauthn.md) for the passkey investigation: what a trusted HTTPS LAN origin would require (a real hostname, a public certificate obtainable via `DNS-01` without a public IP, and split-horizon DNS), why the usual workarounds fail, and the `AUTH_COOKIE_SECURE` switch.
+
 
 ### PostgreSQL Database Setup
 
@@ -105,6 +133,12 @@ The backend will start on `http://localhost:5000`. It uses `tsx watch` to automa
    DATABASE_USER=your_database_user
    DATABASE_PASSWORD=your_database_password
    ```
+
+   These five variables are all that local development needs. A connection can
+   instead be given as a single `DATABASE_URL` (used for a pooled, TLS cloud
+   database, and ignored whenever the five variables above are in use without
+   it). See `backend/.env.example` for the cloud form, the TLS rules and the
+   optional connection-pool settings.
 
 4. Start the backend and watch the startup log. A successful connection prints:
 

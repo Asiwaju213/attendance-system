@@ -56,9 +56,10 @@ const router = Router();
 /**
  * Bucket for the device-login rate limiters.
  *
- * This is the socket address unless the deployment puts the API behind a trusted proxy AND
- * `trust proxy` is enabled (the app does not enable it today). Behind an untrusted proxy every
- * caller would share one bucket; configure `trust proxy` before relying on this in production.
+ * This is the socket address unless the deployment puts the API behind a trusted proxy, in
+ * which case `trust proxy` (see config/trustProxy.ts) resolves it to the real client address
+ * through the single hop Vercel's edge adds. Without that hop every caller would share one
+ * bucket.
  */
 function rateLimitKey(req: Request): string {
   return req.ip ?? req.socket.remoteAddress ?? "unknown";

@@ -1,10 +1,22 @@
+// Import order matters: `./app` pulls in `config/env`, which calls `dotenv.config()`.
+// Only after that is `.env` loaded does `config/server` read HOST and PORT below.
 import { app } from "./app";
+import {
+  describeServerConfig,
+  isLoopbackHost,
+  serverConfig,
+} from "./config/server";
 import { pool } from "./db/pool";
 
-const PORT = Number(process.env.PORT) || 5000;
+const { host, port } = serverConfig;
 
-app.listen(PORT, () => {
-  console.log(`Server is running on http://localhost:${PORT}`);
+app.listen(port, host, () => {
+  console.log(describeServerConfig(serverConfig));
+  if (isLoopbackHost(host)) {
+    console.log(
+      "Set HOST=0.0.0.0 in backend/.env to make the API reachable from the local network."
+    );
+  }
 });
 
 async function checkDatabaseConnection() {

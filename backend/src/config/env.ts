@@ -1,5 +1,14 @@
+import type { PoolConfig } from "pg";
 import dotenv from "dotenv";
 import { assertTestDatabaseEnvironment } from "./testDatabase";
+import {
+  isTestEnvironment,
+  resolveDatabaseConfig,
+  resolveDatabaseSource,
+  resolvePoolSettings,
+  type DatabaseSource,
+  type PoolSettings,
+} from "./database";
 
 dotenv.config();
 
@@ -7,27 +16,20 @@ if (process.env.NODE_ENV === "test") {
   assertTestDatabaseEnvironment();
 }
 
-function requireEnv(name: string): string {
-  const value = process.env[name];
-  if (value === undefined) {
-    throw new Error(`Missing required environment variable: ${name}`);
-  }
-  return value;
+if (isTestEnvironment(process.env) && process.env.DATABASE_URL?.trim()) {
+  // The test database is reached through the discrete variables, which the
+  // isolation guard above checks. Say so rather than quietly ignoring the URL.
+  console.warn(
+    "Ignoring DATABASE_URL because NODE_ENV=test; the test database is always reached through the discrete DATABASE_* variables."
+  );
 }
 
-function requirePort(name: string): number {
-  const value = requireEnv(name);
-  const port = Number(value);
-  if (!Number.isInteger(port) || port < 1 || port > 65535) {
-    throw new Error(`Invalid value for ${name}: "${value}"`);
-  }
-  return port;
-}
+/**
+ * Which form of database configuration is in use. Logged at startup and
+ * deliberately free of any host, database name or credential.
+ */
+export const databaseSource: DatabaseSource = resolveDatabaseSource(process.env);
 
-export const dbConfig = {
-  host: requireEnv("DATABASE_HOST"),
-  port: requirePort("DATABASE_PORT"),
-  database: requireEnv("DATABASE_NAME"),
-  user: requireEnv("DATABASE_USER"),
-  password: requireEnv("DATABASE_PASSWORD"),
-};
+export const dbConfig: PoolConfig = resolveDatabaseConfig(process.env);
+
+export const dbPoolSettings: PoolSettings = resolvePoolSettings(process.env);
