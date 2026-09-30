@@ -34,6 +34,8 @@ policy and the host-only session cookies keep working.
 | Host / port | `HOST` and `PORT` read from the environment; `0.0.0.0` supported |
 | Startup safety | no migration, seed, reset or schema change on start |
 | Health check | `/api/health` returns 200 with the database up, 503 with it down |
+| Build dependencies | `.npmrc` sets `include=dev` so a production `NODE_ENV` cannot strip `tsc` and `@types/*` |
+| Node version | `engines.node` pins Node 22 LTS in the root `package.json` |
 | Trust proxy | **still `1`** — see step 11; do not change it before then |
 
 ## The four kinds of work
@@ -140,6 +142,7 @@ Do not add this command to the Render start command, a build command, or a
 | Start Command | `npm start --workspace backend` |
 | Health Check Path | `/api/health` |
 | Instance type | 1 GB recommended (see [Excel import](#excel-import-and-memory)) |
+| Node version | Node 22 LTS, from `engines.node` in the root `package.json` |
 
 Root Directory must be the repository root. There is exactly one
 `package-lock.json`, at the root, covering both workspaces. Setting the root to
@@ -151,11 +154,56 @@ The build needs no extra system packages. `argon2` ships prebuilt Linux x64
 binaries inside its own package and is loaded by `node-gyp-build`, which prefers
 a matching prebuild over compiling from source.
 
-> **Open item:** the repository declares **no Node version** (no `engines`
-> field, no `.nvmrc`). Render will pick its own default, which can change over
-> time. Once the deployment is proven, pin the working version — either as an
-> `engines` field in the root `package.json` or as Render's `NODE_VERSION`
-> setting. Do this as a separate, deliberate change, after a successful deploy.
+### Node version
+
+Node 22 LTS is pinned with `engines.node` in the root `package.json`, which is
+the single declaration in this repository — there is deliberately no competing
+`.nvmrc` or `.node-version`.
+
+Why Node 22 rather than the default Render would otherwise pick:
+
+- It matches the `@types/node` major already declared in the project
+  (`^22.20.2`), so the runtime and the types agree.
+- It satisfies every engine floor in the dependency tree. Vite 8 requires
+  `^20.19.0 || >=22.12.0`, Playwright requires `>=20`, and Express, `pg`,
+  `tsx`, TypeScript and `argon2` all have lower minimums.
+- `argon2` is unaffected by the choice. Its prebuilds are N-API (version 8),
+  which are ABI-stable across Node majors, so no recompilation is involved.
+
+If a future upgrade moves `@types/node` and the Node pin together, change both.
+
+### Build-time dependencies and `NODE_ENV=production`
+
+The service must run with `NODE_ENV=production`, and Render sets it as an
+environment variable. npm omits `devDependencies` whenever `NODE_ENV=production`
+— and this repository builds TypeScript, so `typescript`, `tsx` and the
+`@types/*` packages are all `devDependencies`.
+
+If the build step inherits that variable, `npm ci` installs runtime packages
+only, and the build fails with errors that name runtime packages rather than the
+real cause:
+
+```
+TS7016: Could not find a declaration file for module 'express'
+TS7016: Could not find a declaration file for module 'pg'
+TS2591: Cannot find name 'process'
+TS2503: Cannot find namespace 'NodeJS'
+TS2584: Cannot find name 'console'
+TS2304: Cannot find name 'URL'
+```
+
+Every one of those means "a type package is not installed". None of them is a
+source defect, and no file needs editing to fix them.
+
+The root `.npmrc` sets `include=dev`, so devDependencies install regardless of
+`NODE_ENV`. That is already npm's default when `NODE_ENV` is unset, so local
+development is unchanged. It is not a size or security regression: these
+packages are build-time only, are never imported by the running server, and are
+not reachable from any request.
+
+The equivalent alternative is `npm ci --include=dev && npm run build --workspace
+backend`. Prefer the `.npmrc`, because a build command typed into a dashboard
+can be edited or re-entered incorrectly, whereas this cannot.
 
 ## 6. Configure Render environment variables
 

@@ -2,6 +2,9 @@
   "name": "oou-attendance-system",
   "version": "1.0.0",
   "private": true,
+  "engines": {
+    "node": "^22.12.0"
+  },
   "description": "OOU Attendance System: npm workspace root (frontend, backend) and end-to-end testing",
   "workspaces": [
     "frontend",

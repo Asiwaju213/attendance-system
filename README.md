@@ -242,6 +242,7 @@ covering both npm workspaces. Pointing the root at `backend/` would break
 | Health Check Path | `/api/health` |
 | Host | `0.0.0.0` |
 | Port | Render-provided `PORT` |
+| Node version | Node 22 LTS, from `engines.node` in the root `package.json` |
 
 `HOST` must be `0.0.0.0` on Render. The application otherwise defaults to
 `127.0.0.1`, which is unreachable from outside the machine, so a service left at
@@ -251,6 +252,36 @@ x64 binaries inside its own package.
 
 Do not add a second lockfile, another package manager, or remove the npm
 workspace structure.
+
+#### Why the build needs `NODE_ENV` handled carefully
+
+The production service must run with `NODE_ENV=production`, and Render sets it as
+an environment variable. npm omits `devDependencies` whenever
+`NODE_ENV=production`, and this repository builds TypeScript — so `typescript`,
+`tsx` and the `@types/*` packages are all `devDependencies`.
+
+If the build step inherits `NODE_ENV=production`, `npm ci` installs runtime
+packages only, and the backend build fails with errors that look like source
+problems but are really missing type packages:
+
+```
+TS7016: Could not find a declaration file for module 'express'
+TS7016: Could not find a declaration file for module 'pg'
+TS2591: Cannot find name 'process'
+TS2503: Cannot find namespace 'NodeJS'
+TS2584: Cannot find name 'console'
+TS2304: Cannot find name 'URL'
+```
+
+The root `.npmrc` sets `include=dev` so this cannot happen: devDependencies
+install unconditionally. This is already npm's default when `NODE_ENV` is unset,
+so it changes nothing locally. It is not a size or security regression — these
+packages are build-time only, are never imported by the running server, and are
+not reachable from any request.
+
+The equivalent alternative is to write the build command as
+`npm ci --include=dev && npm run build --workspace backend`. The `.npmrc` is
+preferred because it cannot be forgotten by a future operator.
 
 ### Environment variables
 
