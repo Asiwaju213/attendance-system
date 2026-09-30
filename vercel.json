@@ -6,7 +6,7 @@
   "rewrites": [
     {
       "source": "/api/:path(.*)",
-      "destination": "https://render-service-placeholder.onrender.com/api/:path*"
+      "destination": "https://attendance-system-ak70.onrender.com/api/:path*"
     },
     {
       "source": "/:path((?!api/|assets/).*)",
