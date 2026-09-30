@@ -5,33 +5,43 @@ import fs from "node:fs";
 import path from "node:path";
 
 /**
- * Task 4: the Vercel serverless entrypoint and the routing that keeps the SPA
- * and the Express API on one origin.
+ * Vercel deploys the static React frontend only; the Express API runs on Render.
  *
- * These tests read the real `vercel.json` and the real `api/index.js` rather
- * than duplicating them, because a routing bug that lives only in the config
- * file would be invisible to a test of a copy of the config. The two failures
- * that matter here are mirrored:
+ * The file name is historical: this suite used to guard a Vercel serverless
+ * entrypoint at `api/index.js`, which no longer exists. What it guards now is
+ * the inverse invariant, so a later change cannot quietly bring the backend
+ * back onto Vercel:
  *
- * 1. A rewrite ordering mistake turns `/api/health` into `index.html`, so the
- *    SPA swallows the API and the frontend silently loses every request.
- * 2. Importing the local entrypoint from the function would run `app.listen()`
- *    and the startup database check inside the function, which cannot work on
- *    Vercel and must not touch a database at import time.
+ * 1. `api/index.js` must not exist. If it reappears, Vercel deploys an Express
+ *    function that has no database environment variables and every `/api/*`
+ *    request fails with a 500.
+ * 2. The Vercel build must compile only the frontend. Building the backend
+ *    there is dead work at best, and a slow or failing backend build breaks a
+ *    deployment that has no reason to care about it.
+ * 3. `/api/*` must proxy to an external Render origin with the `/api` prefix
+ *    and the full sub-path preserved, so the browser keeps talking to the
+ *    canonical Vercel origin and needs no CORS.
+ * 4. The SPA fallback must never swallow `/api/*` or `/assets/*`.
+ *
+ * The Render hostname is deliberately a placeholder until the service exists,
+ * so these tests assert the *shape* of the destination (https, the
+ * `.onrender.com` domain, the preserved `/api` prefix and the matching path
+ * parameter) rather than a specific hostname. They therefore stay green both
+ * before and after the real hostname is substituted, and they never attempt a
+ * network request.
  */
 
 /** The repository root, so the paths below do not depend on the current directory. */
 const repoRoot = path.resolve(__dirname, "..", "..");
 
 const vercelConfigPath = path.join(repoRoot, "vercel.json");
-const vercelEntryPointPath = path.join(repoRoot, "api", "index.js");
-const backendDistAppPath = path.join(repoRoot, "backend", "dist", "app.js");
+const apiDirectoryPath = path.join(repoRoot, "api");
+const apiEntryPointPath = path.join(repoRoot, "api", "index.js");
 const backendDistIndexPath = path.join(repoRoot, "backend", "dist", "index.js");
 const backendSourceEntryPointPath = path.join(repoRoot, "backend", "src", "index.ts");
+const frontendClientPath = path.join(repoRoot, "frontend", "src", "api", "client.ts");
 const viteConfigPath = path.join(repoRoot, "frontend", "vite.config.ts");
 const builtHtmlPath = path.join(repoRoot, "frontend", "dist", "index.html");
-const apiDirectoryPath = path.join(repoRoot, "api");
-const backendPackageJsonPath = path.join(repoRoot, "backend", "package.json");
 
 interface VercelRewrite {
   source: string;
@@ -43,14 +53,15 @@ interface VercelConfig {
   buildCommand?: string;
   outputDirectory?: string;
   rewrites?: VercelRewrite[];
+  functions?: unknown;
   env?: Record<string, unknown>;
   build?: Record<string, unknown>;
 }
 
 /**
- * API paths that must always reach Express. `/api/health` is first because it
- * is the cheapest way to notice that the SPA fallback has swallowed the API,
- * and because it is the probe the LAN and local checks depend on.
+ * API paths that must always reach the Render backend. `/api/health` is first
+ * because it is the cheapest way to notice that the SPA fallback has swallowed
+ * the API, and because it is the probe the LAN and local checks depend on.
  */
 const API_PATHS = [
   "/api/health",
@@ -72,15 +83,41 @@ const SPA_PATHS = [
   "/app/admin",
 ];
 
-/** Module names that would represent a startup database operation. */
-const STARTUP_MODULE_PATTERN = /^(runMigrations|migrate|.*seed.*|.*reset.*|.*cleanup.*)\.js$/i;
-
 function readVercelConfig(): VercelConfig {
   return JSON.parse(fs.readFileSync(vercelConfigPath, "utf8")) as VercelConfig;
 }
 
+/** Every TypeScript source file under a directory, for whole-tree assertions. */
+function collectFiles(directory: string): string[] {
+  const files: string[] = [];
+  for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
+    const entryPath = path.join(directory, entry.name);
+    if (entry.isDirectory()) {
+      files.push(...collectFiles(entryPath));
+    } else if (entry.name.endsWith(".ts")) {
+      files.push(entryPath);
+    }
+  }
+  return files;
+}
+
+/**
+ * A destination template the test requires for the API proxy. It names no
+ * specific service, so swapping in the real Render hostname later does not
+ * require touching this suite.
+ */
+const EXTERNAL_RENDER_DESTINATION = /^https:\/\/[a-z0-9][a-z0-9.-]*\.onrender\.com\/api\/(.*)$/;
+
+function apiRewrite(): VercelRewrite {
+  const rewrites = readVercelConfig().rewrites ?? [];
+  const rewrite = rewrites.find((candidate) => candidate.source.startsWith("/api"));
+  assert.ok(rewrite, "vercel.json must declare a rewrite for /api.");
+  return rewrite;
+}
+
 /**
  * Vercel evaluates rewrites in declaration order and the first match wins.
+ *
  * This compiles the `source` patterns of the shipped `vercel.json` so the tests
  * assert the configuration that will actually be deployed.
  *
@@ -128,18 +165,34 @@ function compileSource(source: string): RegExp {
   return new RegExp(`^${pattern}$`);
 }
 
-/**
- * Removes comments so a static assertion cannot match prose. The entrypoint
- * explains in comments why it must not call `listen()`, and that explanation
- * would otherwise trip a naive text search.
- */
-function stripComments(source: string): string {
-  return source
-    .replace(/\/\*[\s\S]*?\*\//g, " ")
-    .replace(/^[ \t]*\/\/.*$/gm, " ");
+/** Names of the `:name(...)` parameters a rewrite source declares. */
+function sourceParameters(source: string): string[] {
+  return Array.from(source.matchAll(/:([A-Za-z0-9_]+)\(/g)).map((match) => match[1]);
 }
 
-/** Resolve a request path the way Vercel would: first matching rewrite wins. */
+/**
+ * Substitutes a path parameter into a destination template the way Vercel does
+ * at request time, so a test can assert the URL a browser would actually be
+ * sent to rather than only the shape of the template.
+ */
+function resolveDestinationUrl(requestPath: string): URL | undefined {
+  for (const rewrite of readVercelConfig().rewrites ?? []) {
+    const match = compileSource(rewrite.source).exec(requestPath);
+    if (!match) {
+      continue;
+    }
+
+    const substituted = rewrite.destination.replace(
+      /:([A-Za-z0-9_]+)[*+]?/g,
+      (_token, name: string) => match.groups?.[name] ?? ""
+    );
+    return new URL(substituted);
+  }
+
+  return undefined;
+}
+
+/** The rewrite destination template that a given request path selects. */
 function resolveDestination(requestPath: string): string | undefined {
   for (const rewrite of readVercelConfig().rewrites ?? []) {
     if (compileSource(rewrite.source).test(requestPath)) {
@@ -149,6 +202,263 @@ function resolveDestination(requestPath: string): string | undefined {
   return undefined;
 }
 
+/**
+ * Removes comments so a static assertion cannot match prose in a file that
+ * explains why it does *not* use a given setting.
+ */
+function stripComments(source: string): string {
+  return source
+    .replace(/\/\*[\s\S]*?\*\//g, " ")
+    .replace(/^[ \t]*\/\/.*$/gm, " ");
+}
+
+test("Vercel deploys no serverless function", () => {
+  assert.equal(
+    fs.existsSync(apiEntryPointPath),
+    false,
+    "api/index.js must not exist. It would make Vercel deploy an Express function " +
+      "that has no database environment variables."
+  );
+
+  assert.equal(
+    fs.existsSync(apiDirectoryPath),
+    false,
+    "The api/ directory must not exist. Any file inside it is a Vercel function entrypoint."
+  );
+
+  const config = readVercelConfig();
+  assert.equal(
+    config.functions,
+    undefined,
+    "vercel.json must not declare a functions map; Vercel hosts static files only."
+  );
+});
+
+test("the Vercel build compiles the frontend only", () => {
+  const config = readVercelConfig();
+
+  assert.equal(config.buildCommand, "npm run build --workspace frontend");
+  assert.doesNotMatch(
+    config.buildCommand ?? "",
+    /\bbackend\b/,
+    "The backend is built by Render, not by Vercel."
+  );
+
+  // The root build stays as it is: it is what local and LAN development runs,
+  // and Render needs both workspaces available in the repository.
+  const rootPackage = JSON.parse(
+    fs.readFileSync(path.join(repoRoot, "package.json"), "utf8")
+  ) as { scripts: { build: string } };
+  assert.match(rootPackage.scripts.build, /backend/);
+  assert.match(rootPackage.scripts.build, /frontend/);
+});
+
+test("the frontend is served from frontend/dist and no framework is detected", () => {
+  const config = readVercelConfig();
+
+  assert.equal(config.outputDirectory, "frontend/dist");
+  assert.equal(
+    config.framework,
+    null,
+    "Framework auto-detection would look for a Vite app at the repository root."
+  );
+
+  const viteConfig = fs.readFileSync(viteConfigPath, "utf8");
+  assert.doesNotMatch(
+    viteConfig,
+    /outDir/,
+    "Vite must keep its default output directory for vercel.json to stay correct."
+  );
+});
+
+test("/api/* proxies to an external Render origin that preserves the /api prefix", () => {
+  const rewrite = apiRewrite();
+  const match = EXTERNAL_RENDER_DESTINATION.exec(rewrite.destination);
+
+  assert.ok(
+    match,
+    `The /api destination must be https://<service>.onrender.com/api/... but was "${rewrite.destination}". ` +
+      "Dropping the /api prefix would break every backend route."
+  );
+  assert.match(
+    match[1],
+    /:([A-Za-z0-9_]+)\*/,
+    "The destination must forward the remaining path with a wildcard parameter."
+  );
+
+  const forwarded = sourceParameters(rewrite.source);
+  for (const parameter of match[1].matchAll(/:([A-Za-z0-9_]+)\*/g)) {
+    assert.ok(
+      forwarded.includes(parameter[1]),
+      `The destination references ":${parameter[1]}" but the source does not declare it, ` +
+        "so the sub-path would be dropped."
+    );
+  }
+});
+
+test("/api/* is not routed back to a Vercel function", () => {
+  for (const rewrite of readVercelConfig().rewrites ?? []) {
+    assert.notEqual(
+      rewrite.destination,
+      "/api",
+      `The rewrite "${rewrite.source}" targets a Vercel function at /api. ` +
+        "The API runs on Render and must be reached by absolute URL."
+    );
+  }
+});
+
+for (const apiPath of API_PATHS) {
+  test(`proxies ${apiPath} to Render with its path intact`, () => {
+    const destination = resolveDestination(apiPath);
+    assert.ok(destination, `No rewrite matches ${apiPath}.`);
+
+    assert.notEqual(
+      destination,
+      "/index.html",
+      `The SPA fallback swallowed ${apiPath}; the frontend would silently lose every request.`
+    );
+    assert.match(
+      destination,
+      /^https:\/\//,
+      `${apiPath} must reach an external Render origin, not a same-project path.`
+    );
+
+    const url = resolveDestinationUrl(apiPath);
+    assert.ok(url, `Could not resolve ${apiPath} to a URL.`);
+    assert.equal(url.pathname, apiPath, `${apiPath} lost its prefix or sub-path.`);
+    assert.match(url.hostname, /\.onrender\.com$/);
+  });
+}
+
+test("the API rewrite is declared before the SPA fallback", () => {
+  const rewrites = readVercelConfig().rewrites ?? [];
+  const apiRewriteIndex = rewrites.findIndex((rewrite) =>
+    EXTERNAL_RENDER_DESTINATION.test(rewrite.destination)
+  );
+  const spaRewriteIndex = rewrites.findIndex(
+    (rewrite) => rewrite.destination === "/index.html"
+  );
+
+  assert.ok(apiRewriteIndex >= 0, "vercel.json must declare the external Render API rewrite.");
+  assert.ok(spaRewriteIndex >= 0, "vercel.json must declare an SPA fallback rewrite.");
+  assert.ok(
+    apiRewriteIndex < spaRewriteIndex,
+    "Rewrites are first-match-wins, so the API rewrite has to come first."
+  );
+});
+
+test("no rewrite sends an /api path to the SPA entrypoint", () => {
+  for (const rewrite of readVercelConfig().rewrites ?? []) {
+    const pattern = compileSource(rewrite.source);
+    for (const apiPath of API_PATHS) {
+      if (!pattern.test(apiPath)) {
+        continue;
+      }
+      assert.notEqual(
+        rewrite.destination,
+        "/index.html",
+        `Rewrite "${rewrite.source}" would swallow ${apiPath}.`
+      );
+    }
+  }
+});
+
+test("built frontend assets are excluded from the SPA fallback", () => {
+  assert.ok(
+    fs.existsSync(builtHtmlPath),
+    "frontend/dist/index.html is missing. Run `npm run build --workspace frontend` first."
+  );
+
+  // The real asset names are read out of the generated HTML rather than
+  // hardcoded, so a Vite hash change cannot leave this test asserting a path
+  // that no longer exists.
+  const html = fs.readFileSync(builtHtmlPath, "utf8");
+  const assetPaths = Array.from(html.matchAll(/(?:src|href)="(\/assets\/[^"]+)"/g)).map(
+    (match) => match[1]
+  );
+
+  assert.ok(assetPaths.length > 0, "Expected the built HTML to reference hashed /assets/ files.");
+
+  for (const assetPath of assetPaths) {
+    assert.equal(
+      resolveDestination(assetPath),
+      undefined,
+      `${assetPath} must be served from the build output, not rewritten to index.html.`
+    );
+  }
+});
+
+for (const spaPath of SPA_PATHS) {
+  test(`serves the SPA entrypoint for ${spaPath}`, () => {
+    assert.equal(resolveDestination(spaPath), "/index.html");
+  });
+}
+
+test("the frontend keeps calling the API on its own origin", () => {
+  const client = stripComments(fs.readFileSync(frontendClientPath, "utf8"));
+
+  assert.match(
+    client,
+    /fetch\(\s*`\/api\$\{/,
+    "The frontend must request relative /api paths so the browser stays on the Vercel origin."
+  );
+  assert.match(
+    client,
+    /credentials:\s*"include"/,
+    "Session cookies must still be sent with every API request."
+  );
+  assert.doesNotMatch(
+    client,
+    /https?:\/\//,
+    "The frontend must not hard-code the Render origin; the proxy hides it."
+  );
+  assert.doesNotMatch(
+    client,
+    /VITE_API_(URL|BASE)/,
+    "A production API base URL is not needed while requests stay same-origin."
+  );
+});
+
+test("the project adds no CORS to work around the proxy", () => {
+  const backendSources = collectFiles(path.join(repoRoot, "backend", "src"));
+  const offending = backendSources.filter((file) =>
+    /\bfrom\s+["']cors["']|Access-Control-Allow-Origin/.test(
+      stripComments(fs.readFileSync(file, "utf8"))
+    )
+  );
+
+  assert.deepEqual(
+    offending,
+    [],
+    "Requests are same-origin through the Vercel rewrite, so CORS must not be enabled."
+  );
+});
+
+test("vercel.json contains no secrets and no production environment values", () => {
+  const raw = fs.readFileSync(vercelConfigPath, "utf8");
+
+  for (const forbidden of [
+    "postgres://",
+    "postgresql://",
+    "DATABASE_URL",
+    "WEBAUTHN",
+    "SECRET",
+  ]) {
+    assert.ok(
+      !raw.includes(forbidden),
+      `vercel.json must not contain ${forbidden}; the backend environment provides it.`
+    );
+  }
+
+  const config = readVercelConfig();
+  assert.equal(
+    config.env,
+    undefined,
+    "Environment values belong in Render and in Vercel's own settings, not in vercel.json."
+  );
+  assert.equal(config.build, undefined);
+});
+
 interface NodeRunResult {
   code: number | null;
   stdout: string;
@@ -157,7 +467,7 @@ interface NodeRunResult {
 }
 
 /**
- * Runs a script in a child Node process so importing a module for real cannot
+ * Runs a script in a child Node process so requiring a module for real cannot
  * leave a listening socket or an open pool handle inside the test runner.
  */
 function runNode(script: string, extraEnv: NodeJS.ProcessEnv = {}): Promise<NodeRunResult> {
@@ -188,244 +498,31 @@ function runNode(script: string, extraEnv: NodeJS.ProcessEnv = {}): Promise<Node
 }
 
 /**
- * Keeps the child processes away from any real database. The values are not
+ * Keeps the child process away from any real database. These values are not
  * configuration under test, only a guarantee that nothing here can connect,
- * migrate or seed anything. `DATABASE_URL` is blanked so the discrete
- * variables are used, and `NODE_ENV` avoids the test-suite database guard.
+ * migrate or seed anything.
  */
 const offlineEnv: NodeJS.ProcessEnv = {
   NODE_ENV: "development",
   DATABASE_URL: "",
   DATABASE_HOST: "127.0.0.1",
   DATABASE_PORT: "1",
-  DATABASE_NAME: "vercel_entrypoint_offline_probe",
-  DATABASE_USER: "vercel_entrypoint_offline_probe",
-  DATABASE_PASSWORD: "vercel_entrypoint_offline_probe",
+  DATABASE_NAME: "vercel_static_frontend_offline_probe",
+  DATABASE_USER: "vercel_static_frontend_offline_probe",
+  DATABASE_PASSWORD: "vercel_static_frontend_offline_probe",
   DATABASE_SSL: "false",
 };
 
-test("one project builds both workspaces and serves the existing Vite output directory", () => {
-  const config = readVercelConfig();
-
-  assert.equal(config.buildCommand, "npm run build");
-  assert.equal(config.outputDirectory, "frontend/dist");
-  assert.equal(
-    config.framework,
-    null,
-    "Framework auto-detection would look for a Vite app at the repository root."
-  );
-
-  const viteConfig = fs.readFileSync(viteConfigPath, "utf8");
-  assert.doesNotMatch(
-    viteConfig,
-    /outDir/,
-    "Vite must keep its default output directory for vercel.json to stay correct."
-  );
-
-  const rootPackage = JSON.parse(
-    fs.readFileSync(path.join(repoRoot, "package.json"), "utf8")
-  ) as { scripts: { build: string } };
-  assert.match(rootPackage.scripts.build, /backend/);
-  assert.match(rootPackage.scripts.build, /frontend/);
-});
-
-test("the API rewrite is declared before the SPA fallback", () => {
-  const rewrites = readVercelConfig().rewrites ?? [];
-  const apiRewriteIndex = rewrites.findIndex((rewrite) => rewrite.destination === "/api");
-  const spaRewriteIndex = rewrites.findIndex(
-    (rewrite) => rewrite.destination === "/index.html"
-  );
-
-  assert.ok(apiRewriteIndex >= 0, "vercel.json must declare a rewrite to the Express function.");
-  assert.ok(spaRewriteIndex >= 0, "vercel.json must declare an SPA fallback rewrite.");
-  assert.ok(
-    apiRewriteIndex < spaRewriteIndex,
-    "Rewrites are first-match-wins, so the API rewrite has to come first."
-  );
-});
-
-for (const apiPath of API_PATHS) {
-  test(`routes ${apiPath} to the Express function instead of the SPA entrypoint`, () => {
-    assert.equal(resolveDestination(apiPath), "/api");
-  });
-}
-
-test("/api/health cannot be rewritten to /index.html", () => {
-  assert.notEqual(resolveDestination("/api/health"), "/index.html");
-});
-
-test("no rewrite sends an /api path to the SPA entrypoint", () => {
-  for (const rewrite of readVercelConfig().rewrites ?? []) {
-    const pattern = compileSource(rewrite.source);
-    for (const apiPath of API_PATHS) {
-      if (!pattern.test(apiPath)) {
-        continue;
-      }
-      assert.notEqual(
-        rewrite.destination,
-        "/index.html",
-        `Rewrite "${rewrite.source}" would swallow ${apiPath}.`
-      );
-    }
-  }
-});
-
-test("built frontend assets are excluded from the SPA fallback", () => {
-  assert.ok(
-    fs.existsSync(builtHtmlPath),
-    "frontend/dist/index.html is missing. Run `npm run build` at the repository root first."
-  );
-
-  // The real asset names are read out of the generated HTML rather than
-  // hardcoded, so a Vite hash change cannot leave this test asserting a path
-  // that no longer exists.
-  const html = fs.readFileSync(builtHtmlPath, "utf8");
-  const assetPaths = Array.from(html.matchAll(/(?:src|href)="(\/assets\/[^"]+)"/g)).map(
-    (match) => match[1]
-  );
-
-  assert.ok(assetPaths.length > 0, "Expected the built HTML to reference hashed /assets/ files.");
-
-  for (const assetPath of assetPaths) {
-    assert.equal(
-      resolveDestination(assetPath),
-      undefined,
-      `${assetPath} must be served from the build output, not rewritten to index.html.`
-    );
-  }
-});
-
-test("the Express function is declared once, and it is not the auto-detected local listener", () => {
-  const apiEntries = fs.readdirSync(apiDirectoryPath, { withFileTypes: true }).filter((entry) =>
-    entry.isFile()
-  );
-
-  assert.deepEqual(
-    apiEntries.map((entry) => entry.name),
-    ["index.js"],
-    "The api/ directory must contain exactly one function entrypoint."
-  );
-
-  // `backend/package.json` points `main` at `dist/index.js`, which is the local
-  // listener that calls app.listen() and runs the startup database check. The
-  // function must keep targeting `dist/app.js`, and `framework` must stay null
-  // so Vercel does not auto-detect Express and pick that file instead.
-  const backendPackage = JSON.parse(fs.readFileSync(backendPackageJsonPath, "utf8")) as {
-    main?: string;
-  };
-  assert.equal(backendPackage.main, "dist/index.js");
-  assert.match(
-    stripComments(fs.readFileSync(vercelEntryPointPath, "utf8")),
-    /app\.js/
-  );
-  assert.equal(readVercelConfig().framework, null);
-});
-
-for (const spaPath of SPA_PATHS) {
-  test(`serves the SPA entrypoint for ${spaPath}`, () => {
-    assert.equal(resolveDestination(spaPath), "/index.html");
-  });
-}
-
-test("vercel.json contains no secrets and no production environment values", () => {
-  const raw = fs.readFileSync(vercelConfigPath, "utf8");
-
-  for (const forbidden of [
-    "postgres://",
-    "postgresql://",
-    "DATABASE_URL",
-    "WEBAUTHN",
-    "SECRET",
-  ]) {
-    assert.ok(
-      !raw.includes(forbidden),
-      `vercel.json must not contain ${forbidden}; the Vercel environment provides it.`
-    );
-  }
-
-  const config = readVercelConfig();
-  assert.equal(config.env, undefined, "Environment values belong in Vercel, not in vercel.json.");
-  assert.equal(config.build, undefined);
-});
-
-test("the Vercel entrypoint never calls listen and never loads the local entrypoint", () => {
-  const code = stripComments(fs.readFileSync(vercelEntryPointPath, "utf8"));
-
-  assert.doesNotMatch(code, /\.listen\s*\(/);
-  assert.doesNotMatch(code, /"index\.js"/);
-  assert.doesNotMatch(code, /checkDatabaseConnection/);
-});
-
-test("the Vercel function exports the Express app without listening, migrating or seeding", async () => {
-  assert.ok(
-    fs.existsSync(backendDistAppPath),
-    "backend/dist/app.js is missing. Run `npm run build` at the repository root first."
-  );
-
-  const script = [
-    `const loaded = require(${JSON.stringify(vercelEntryPointPath)});`,
-    "const app = loaded && loaded.default ? loaded.default : loaded;",
-    "const loadedModules = Object.keys(require.cache).map((p) => p.replace(/\\\\/g, '/'));",
-    'const names = loadedModules.map((p) => p.split("/").pop());',
-    'console.log("PROBE " + JSON.stringify({',
-    "  isFunction: typeof app === 'function',",
-    "  hasListen: typeof app === 'function' && typeof app.listen === 'function',",
-    // The local entrypoint is identified by its exact compiled path. Comparing
-    // basenames alone would match any index.js in the backend tree.
-    `  loadedLocalEntrypoint: loadedModules.indexOf(${JSON.stringify(
-      backendDistIndexPath.replace(/\\/g, "/")
-    )}) !== -1,`,
-    `  startupModules: names.filter((n) => ${STARTUP_MODULE_PATTERN.toString()}.test(n)),`,
-    "}));",
-  ].join("\n");
-
-  const result = await runNode(script, offlineEnv);
-
-  assert.equal(
-    result.timedOut,
-    false,
-    "Importing the Vercel entrypoint kept the process alive, so it opened a socket."
-  );
-  assert.equal(result.code, 0, `Import failed:\n${result.stderr}`);
-
-  const probeLine = result.stdout
-    .split("\n")
-    .filter((line) => line.startsWith("PROBE "))
-    .pop();
-  assert.ok(probeLine, `The probe did not report a result:\n${result.stdout}`);
-
-  const probe = JSON.parse(probeLine.slice("PROBE ".length)) as {
-    isFunction: boolean;
-    hasListen: boolean;
-    loadedLocalEntrypoint: boolean;
-    startupModules: string[];
-  };
-
-  assert.equal(probe.isFunction, true, "Vercel needs a (req, res) handler.");
-  assert.equal(probe.hasListen, true, "The exported app must be the Express application.");
-  assert.equal(
-    probe.loadedLocalEntrypoint,
-    false,
-    "Loading backend/dist/index.js would run app.listen() inside the function."
-  );
-  assert.deepEqual(
-    probe.startupModules,
-    [],
-    "The function must not load migration, seed, reset or cleanup modules."
-  );
-
-  assert.doesNotMatch(result.stdout, /API listening on/);
-  assert.doesNotMatch(result.stdout + result.stderr, /Database connection (established|Unable)/);
-});
-
-test("the local entrypoint still binds with app.listen using HOST and PORT", async () => {
+test("the backend entrypoint still binds a socket for Render", async () => {
   assert.ok(
     fs.existsSync(backendDistIndexPath),
-    "backend/dist/index.js is missing. Run `npm run build` at the repository root first."
+    "backend/dist/index.js is missing. Run `npm run build --workspace backend` first."
   );
 
   const script = [
-    `const { app } = require(${JSON.stringify(backendDistAppPath)});`,
+    `const { app } = require(${JSON.stringify(
+      path.join(repoRoot, "backend", "dist", "app.js")
+    )});`,
     "let listenCall = null;",
     "app.listen = (port, host, callback) => {",
     "  listenCall = [port, host];",
@@ -438,22 +535,14 @@ test("the local entrypoint still binds with app.listen using HOST and PORT", asy
 
   const result = await runNode(script, { ...offlineEnv, HOST: "127.0.0.1", PORT: "5099" });
 
-  assert.equal(result.code, 0, `Local entrypoint failed:\n${result.stderr}`);
+  assert.equal(result.code, 0, `Backend entrypoint failed:\n${result.stderr}`);
   assert.match(result.stdout, /LISTEN_CALL \[5099,"127\.0\.0\.1"\]/);
-  assert.match(
-    result.stdout,
-    /OOU Attendance System API listening on http:\/\/127\.0\.0\.1:5099 \(loopback only\)\./
-  );
 });
 
-test("the startup database connectivity check stays with the local entrypoint", () => {
+test("the startup database check stays a non-destructive SELECT 1 on the backend entrypoint", () => {
   const localSource = fs.readFileSync(backendSourceEntryPointPath, "utf8");
 
   assert.match(localSource, /app\.listen\(/);
   assert.match(localSource, /checkDatabaseConnection/);
   assert.match(localSource, /SELECT 1/);
-  assert.doesNotMatch(
-    stripComments(fs.readFileSync(vercelEntryPointPath, "utf8")),
-    /checkDatabaseConnection|SELECT 1/
-  );
 });

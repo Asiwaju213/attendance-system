@@ -24,6 +24,31 @@ import type { Express } from "express";
  * variable here would be a way to silently disable IP-based rate limiting in
  * production, and there is no deployment of this application that needs a
  * different number of hops.
+ *
+ * TODO(render): this value was chosen for the former Vercel Function
+ * architecture, where the edge was the only proxy in front of Express. The
+ * production topology is now Vercel (static frontend) -> Render Web Service
+ * (Express), which introduces a second proxy and therefore a forwarded-header
+ * chain of a different length. `1` is very likely wrong there: it would report
+ * the address of Vercel's edge as `req.ip`, collapsing distinct users onto a
+ * small rotating set of proxy addresses and weakening IP-based rate limiting.
+ *
+ * Do NOT simply change the constant on the strength of that reasoning. The real
+ * value depends on whether Render preserves the `X-Forwarded-For` header Vercel
+ * sends and appends its own entry, which cannot be known until a Render service
+ * exists. Until then this stays as it is, because guessing either way would be
+ * worse than the current known-imperfect value: too low a count is a rate-limit
+ * weakness, and `true` would let a client choose its own `req.ip`.
+ *
+ * To resolve it, deploy to Render, send one request through the real Vercel
+ * rewrite, and observe the actual header chain (see
+ * `docs/render-neon-deployment.md`, "Verify the real X-Forwarded-For
+ * behavior"). Then set the count to match, and update this comment and
+ * `backend/tests/trustProxy.test.ts` together.
+ *
+ * Note that this setting has no effect on session cookies: `Secure` is derived
+ * from `AUTH_COOKIE_SECURE`/`NODE_ENV` in `config/auth.ts`, and no code reads
+ * `req.protocol`, `req.secure` or `req.hostname`.
  */
 export const TRUSTED_PROXY_HOPS = 1;
 

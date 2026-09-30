@@ -206,6 +206,148 @@ npm run test:e2e:report
 
 After a run, Playwright saves an interactive HTML report to `playwright-report/`. The command above opens it in your browser. Traces, screenshots, and videos on failures are saved under `test-results/`. Both folders are ignored by Git.
 
+## Production Deployment
+
+### Architecture
+
+```
+Browser
+  -> HTTPS
+  -> Vercel            React/Vite frontend (static only, no Functions)
+  -> /api/* rewrite    same-origin proxy
+  -> Render            Node.js + Express API (Web Service)
+  -> Neon              PostgreSQL
+```
+
+The browser only ever sees `https://oou-attendance-system.vercel.app`. It never
+learns the Render hostname: the frontend keeps requesting relative `/api/...`
+paths, Vercel proxies them, and the request stays same-origin. That is why there
+is no CORS policy and why the host-only session cookies keep working.
+
+Vercel builds and serves the frontend only. The Express API runs on Render as a
+long-running Node process, and PostgreSQL is provided by Neon.
+
+### Render
+
+Set these in the Render dashboard. **Root Directory must be `/`** (the
+repository root): there is exactly one `package-lock.json`, at the root,
+covering both npm workspaces. Pointing the root at `backend/` would break
+`npm ci` and lose the workspace layout.
+
+| Setting | Value |
+| --- | --- |
+| Root Directory | `/` |
+| Build Command | `npm ci && npm run build --workspace backend` |
+| Start Command | `npm start --workspace backend` (runs `node dist/index.js`) |
+| Health Check Path | `/api/health` |
+| Host | `0.0.0.0` |
+| Port | Render-provided `PORT` |
+
+`HOST` must be `0.0.0.0` on Render. The application otherwise defaults to
+`127.0.0.1`, which is unreachable from outside the machine, so a service left at
+the default starts and then fails every request. Render supplies `PORT` and the
+application binds it. No OS packages are needed: `argon2` ships prebuilt Linux
+x64 binaries inside its own package.
+
+Do not add a second lockfile, another package manager, or remove the npm
+workspace structure.
+
+### Environment variables
+
+Set these in Render's environment settings. Never in Git.
+
+| Variable | Value |
+| --- | --- |
+| `NODE_ENV` | `production` |
+| `HOST` | `0.0.0.0` |
+| `PORT` | Render-assigned |
+| `DATABASE_URL` | Neon **pooled** connection string |
+| `WEBAUTHN_RP_ID` | `oou-attendance-system.vercel.app` |
+| `WEBAUTHN_ORIGIN` | `https://oou-attendance-system.vercel.app` |
+| `WEBAUTHN_RP_NAME` | `OOU Attendance System` |
+
+`NODE_ENV=production` is what enables the production guards: session cookies are
+forced to carry `Secure`, and `DATABASE_SSL=false` and
+`AUTH_COOKIE_SECURE=false` become outright startup errors.
+
+See [`backend/.env.example`](backend/.env.example) for the full variable
+reference, including the optional pool settings.
+
+### Database
+
+The runtime uses the Neon **pooled** endpoint; migrations use the Neon
+**direct** endpoint.
+
+| Connection | Endpoint | Used by |
+| --- | --- | --- |
+| Pooled (`-pooler` host) | running Render service | day-to-day traffic |
+| Direct (no `-pooler`) | `npm run migrate --workspace backend` | migrations only |
+
+Migrations are **not** part of application startup, and must never be placed in
+the Render start command. The production start path only loads configuration,
+creates the app, runs a read-only `SELECT 1` connectivity check, and listens. It
+does not migrate, seed, reset, truncate or alter schema.
+
+Run migrations deliberately, once, before production traffic:
+
+```bash
+# With DATABASE_URL set to the Neon DIRECT connection string:
+npm run migrate --workspace backend
+```
+
+TLS validation stays on. `sslmode=verify-full` is accepted, and omitting
+`sslmode` entirely is also accepted. `sslmode=require`, `prefer`, `disable` and
+`no-verify` are refused at startup, so a Neon connection string that still
+carries Neon's default `sslmode=require` must be corrected first. Do not set
+`DATABASE_SSL=false` in production.
+
+### WebAuthn
+
+The canonical production origin is `https://oou-attendance-system.vercel.app`,
+which is the Vercel frontend — **not** the Render host.
+
+WebAuthn binds a credential to the origin the ceremony actually runs in. Because
+the browser loads pages from and talks only to the Vercel origin, the Render
+hostname must never be used as the RP ID or the expected origin, and there is no
+preview-host workaround. `WEBAUTHN_RP_ID` and `WEBAUTHN_ORIGIN` are required in
+production; the application refuses to start without them.
+
+### Health check
+
+`/api/health` is the Render health check path. It queries the database and
+reports `200` with `"database":"connected"` when the database is reachable, and
+`503` with `"database":"unavailable"` when it is not. It never returns
+credentials or connection details, and no debug endpoint exists to make it pass.
+
+### Security
+
+- **Do not commit production secrets.** No `DATABASE_URL`, database password,
+  Render token or Neon credential belongs in Git, in a commit message, or in a
+  log. Real values live in Render's encrypted environment settings, and locally
+  in `backend/.env`, which is ignored by Git.
+- **Do not use `DATABASE_SSL=false`** in production. It is rejected outright
+  when `NODE_ENV=production`.
+- **Do not run seed, reset or E2E setup against production.**
+  `npm run seed:e2e`, `npm run unseed:e2e` and `npm run test:db:prepare` target
+  the local/E2E test database only.
+- **Do not expose debug or test endpoints** to make a health check or
+  deployment succeed.
+- **Do not add CORS.** Requests are same-origin through the Vercel rewrite by
+  design.
+- **Do not weaken WebAuthn verification** or relax session cookie attributes to
+  make a deployment succeed.
+
+### Known open item: trust proxy
+
+`backend/src/config/trustProxy.ts` still trusts a single proxy hop, a value
+chosen when Vercel's edge was the only proxy in front of Express. With Render in
+the path the forwarded-header chain is longer, so this needs revisiting — but the
+correct value cannot be guessed and must be observed on a real deployment. It is
+documented in the source file and in the runbook.
+
+For the full deployment sequence, see
+[`docs/render-neon-deployment.md`](docs/render-neon-deployment.md).
+
 ## Database
 
 The backend currently uses the PostgreSQL `pg` driver directly via a connection pool (`backend/src/db/pool.ts`). Credentials are read from the environment variables in `backend/.env`. Schema design and migrations will be added in a future step, and the `database/` directory is reserved for that purpose.
