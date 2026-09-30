@@ -29,6 +29,9 @@ const backendDistAppPath = path.join(repoRoot, "backend", "dist", "app.js");
 const backendDistIndexPath = path.join(repoRoot, "backend", "dist", "index.js");
 const backendSourceEntryPointPath = path.join(repoRoot, "backend", "src", "index.ts");
 const viteConfigPath = path.join(repoRoot, "frontend", "vite.config.ts");
+const builtHtmlPath = path.join(repoRoot, "frontend", "dist", "index.html");
+const apiDirectoryPath = path.join(repoRoot, "api");
+const backendPackageJsonPath = path.join(repoRoot, "backend", "package.json");
 
 interface VercelRewrite {
   source: string;
@@ -265,6 +268,57 @@ test("no rewrite sends an /api path to the SPA entrypoint", () => {
       );
     }
   }
+});
+
+test("built frontend assets are excluded from the SPA fallback", () => {
+  assert.ok(
+    fs.existsSync(builtHtmlPath),
+    "frontend/dist/index.html is missing. Run `npm run build` at the repository root first."
+  );
+
+  // The real asset names are read out of the generated HTML rather than
+  // hardcoded, so a Vite hash change cannot leave this test asserting a path
+  // that no longer exists.
+  const html = fs.readFileSync(builtHtmlPath, "utf8");
+  const assetPaths = Array.from(html.matchAll(/(?:src|href)="(\/assets\/[^"]+)"/g)).map(
+    (match) => match[1]
+  );
+
+  assert.ok(assetPaths.length > 0, "Expected the built HTML to reference hashed /assets/ files.");
+
+  for (const assetPath of assetPaths) {
+    assert.equal(
+      resolveDestination(assetPath),
+      undefined,
+      `${assetPath} must be served from the build output, not rewritten to index.html.`
+    );
+  }
+});
+
+test("the Express function is declared once, and it is not the auto-detected local listener", () => {
+  const apiEntries = fs.readdirSync(apiDirectoryPath, { withFileTypes: true }).filter((entry) =>
+    entry.isFile()
+  );
+
+  assert.deepEqual(
+    apiEntries.map((entry) => entry.name),
+    ["index.js"],
+    "The api/ directory must contain exactly one function entrypoint."
+  );
+
+  // `backend/package.json` points `main` at `dist/index.js`, which is the local
+  // listener that calls app.listen() and runs the startup database check. The
+  // function must keep targeting `dist/app.js`, and `framework` must stay null
+  // so Vercel does not auto-detect Express and pick that file instead.
+  const backendPackage = JSON.parse(fs.readFileSync(backendPackageJsonPath, "utf8")) as {
+    main?: string;
+  };
+  assert.equal(backendPackage.main, "dist/index.js");
+  assert.match(
+    stripComments(fs.readFileSync(vercelEntryPointPath, "utf8")),
+    /app\.js/
+  );
+  assert.equal(readVercelConfig().framework, null);
 });
 
 for (const spaPath of SPA_PATHS) {
