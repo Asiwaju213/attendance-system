@@ -1,5 +1,9 @@
 import { pool } from "../db/pool";
 import {
+  appendDepartmentEvent,
+  appendFacultyEvent,
+} from "./syncMasterDataEmitters";
+import {
   DepartmentWithFaculty,
   Faculty,
   OrganizationStatus,
@@ -91,19 +95,27 @@ export async function findFacultyById(id: number): Promise<Faculty | null> {
 export async function createFaculty(
   input: FacultyCreateInput
 ): Promise<OrganizationWriteResult<Faculty>> {
+  const client = await pool.connect();
   try {
-    const result = await pool.query(
+    await client.query("BEGIN");
+    const result = await client.query(
       `INSERT INTO faculties (name, code)
        VALUES ($1, $2)
        RETURNING id, name, code, status, created_at, updated_at`,
       [input.name, input.code]
     );
+    const facultyId = Number(result.rows[0].id);
+    await appendFacultyEvent(client, "CREATED", facultyId);
+    await client.query("COMMIT");
     return { ok: true, data: toFaculty(result.rows[0] as FacultyRow) };
   } catch (error) {
+    await client.query("ROLLBACK").catch(() => undefined);
     if (pgErrorCode(error) === "23505") {
       return { ok: false, code: "CONFLICT" };
     }
     throw error;
+  } finally {
+    client.release();
   }
 }
 
@@ -120,8 +132,10 @@ export async function updateFaculty(
   const values = fields.map(([, value]) => value);
   values.push(id);
 
+  const client = await pool.connect();
   try {
-    const result = await pool.query(
+    await client.query("BEGIN");
+    const result = await client.query(
       `UPDATE faculties
        SET ${sets.join(", ")}
        WHERE id = $${fields.length + 1}
@@ -130,14 +144,20 @@ export async function updateFaculty(
     );
     const row = result.rows[0] as FacultyRow | undefined;
     if (!row) {
+      await client.query("ROLLBACK");
       return { ok: false, code: "NOT_FOUND" };
     }
+    await appendFacultyEvent(client, "UPDATED", id);
+    await client.query("COMMIT");
     return { ok: true, data: toFaculty(row) };
   } catch (error) {
+    await client.query("ROLLBACK").catch(() => undefined);
     if (pgErrorCode(error) === "23505") {
       return { ok: false, code: "CONFLICT" };
     }
     throw error;
+  } finally {
+    client.release();
   }
 }
 
@@ -155,8 +175,10 @@ export async function listDepartments(): Promise<DepartmentWithFaculty[]> {
 export async function createDepartment(
   input: DepartmentCreateInput
 ): Promise<OrganizationWriteResult<DepartmentWithFaculty>> {
+  const client = await pool.connect();
   try {
-    const result = await pool.query(
+    await client.query("BEGIN");
+    const result = await client.query(
       `WITH inserted AS (
          INSERT INTO departments (name, code, faculty_id)
          VALUES ($1, $2, $3)
@@ -168,8 +190,15 @@ export async function createDepartment(
        JOIN faculties f ON f.id = i.faculty_id`,
       [input.name, input.code, input.facultyId]
     );
+    await appendDepartmentEvent(
+      client,
+      "CREATED",
+      Number(result.rows[0].id)
+    );
+    await client.query("COMMIT");
     return { ok: true, data: toDepartmentWithFaculty(result.rows[0] as DepartmentRow) };
   } catch (error) {
+    await client.query("ROLLBACK").catch(() => undefined);
     if (pgErrorCode(error) === "23505") {
       return { ok: false, code: "CONFLICT" };
     }
@@ -177,6 +206,8 @@ export async function createDepartment(
       return { ok: false, code: "FACULTY_NOT_FOUND" };
     }
     throw error;
+  } finally {
+    client.release();
   }
 }
 
@@ -194,8 +225,10 @@ export async function updateDepartment(
   const values = fields.map(([, value]) => value);
   values.push(id);
 
+  const client = await pool.connect();
   try {
-    const result = await pool.query(
+    await client.query("BEGIN");
+    const result = await client.query(
       `WITH updated AS (
          UPDATE departments
          SET ${sets.join(", ")}
@@ -210,10 +243,14 @@ export async function updateDepartment(
     );
     const row = result.rows[0] as DepartmentRow | undefined;
     if (!row) {
+      await client.query("ROLLBACK");
       return { ok: false, code: "NOT_FOUND" };
     }
+    await appendDepartmentEvent(client, "UPDATED", id);
+    await client.query("COMMIT");
     return { ok: true, data: toDepartmentWithFaculty(row) };
   } catch (error) {
+    await client.query("ROLLBACK").catch(() => undefined);
     if (pgErrorCode(error) === "23505") {
       return { ok: false, code: "CONFLICT" };
     }
@@ -221,5 +258,7 @@ export async function updateDepartment(
       return { ok: false, code: "FACULTY_NOT_FOUND" };
     }
     throw error;
+  } finally {
+    client.release();
   }
 }

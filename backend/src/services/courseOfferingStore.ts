@@ -1,4 +1,5 @@
 import { pool } from "../db/pool";
+import { appendCourseOfferingEvent } from "./syncMasterDataEmitters";
 import {
   AssignedLecturer,
   CourseOffering,
@@ -353,8 +354,10 @@ export async function createOffering(
     return { ok: false, code: "SEMESTER_NOT_FOUND" };
   }
 
+  const client = await pool.connect();
   try {
-    const result = await pool.query(
+    await client.query("BEGIN");
+    const result = await client.query(
       `WITH inserted AS (
          INSERT INTO course_offerings (course_id, academic_session_id, semester_id)
          VALUES ($1, $2, $3)
@@ -363,12 +366,17 @@ export async function createOffering(
        ${OFFERING_SELECT.replace("FROM course_offerings o", "FROM inserted o")}`,
       [input.courseId, input.academicSessionId, input.semesterId]
     );
+    await appendCourseOfferingEvent(client, "CREATED", Number(result.rows[0].id));
+    await client.query("COMMIT");
     return { ok: true, data: toOffering(result.rows[0] as OfferingRow) };
   } catch (error) {
+    await client.query("ROLLBACK").catch(() => undefined);
     if (pgErrorCode(error) === "23505") {
       return { ok: false, code: "CONFLICT" };
     }
     throw error;
+  } finally {
+    client.release();
   }
 }
 
@@ -432,8 +440,10 @@ export async function updateOffering(
   const values = fields.map(([, value]) => value);
   values.push(id);
 
+  const client = await pool.connect();
   try {
-    const result = await pool.query(
+    await client.query("BEGIN");
+    const result = await client.query(
       `WITH updated AS (
          UPDATE course_offerings
          SET ${sets.join(", ")}
@@ -445,14 +455,20 @@ export async function updateOffering(
     );
     const row = result.rows[0] as OfferingRow | undefined;
     if (!row) {
+      await client.query("ROLLBACK");
       return { ok: false, code: "NOT_FOUND" };
     }
+    await appendCourseOfferingEvent(client, "UPDATED", id);
+    await client.query("COMMIT");
     return { ok: true, data: toOffering(row) };
   } catch (error) {
+    await client.query("ROLLBACK").catch(() => undefined);
     if (pgErrorCode(error) === "23505") {
       return { ok: false, code: "CONFLICT" };
     }
     throw error;
+  } finally {
+    client.release();
   }
 }
 

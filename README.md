@@ -20,7 +20,8 @@ attendance-system/
 ├── frontend/          # React + TypeScript client application
 ├── backend/           # Express.js + TypeScript API server
 ├── database/          # Database schemas and migrations (coming soon)
-├── docs/              # Project documentation (see docs/lan-mode.md)
+├── docs/              # Project documentation (see docs/lan-mode.md and
+│                      #   docs/cloud-k12-sync.md)
 ├── tests/e2e/         # Playwright end-to-end browser tests
 ├── playwright.config.ts
 ├── package.json       # Root package.json (E2E test scripts)
@@ -168,6 +169,13 @@ Expected response when the database is reachable:
 ```
 
 If the database is unreachable, the endpoint returns HTTP 503 with `"database": "unavailable"` and `"status": "degraded"`.
+
+## Cloud ↔ K12 Edge Synchronization
+
+See [`docs/cloud-k12-sync.md`](docs/cloud-k12-sync.md) for the cloud ↔ K12 edge
+synchronization design: authoritative data ownership, cursor/event ordering,
+idempotency, edge authentication, the worker's lifecycle, failure behavior, and
+the `SYNC_*` configuration.
 
 ## End-to-End Testing with Playwright
 

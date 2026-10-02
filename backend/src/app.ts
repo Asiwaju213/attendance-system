@@ -15,6 +15,7 @@ import adminSemestersRouter from "./routes/adminSemesters";
 import adminStudentImportRouter from "./routes/adminStudentImport";
 import adminStudentDevicesRouter from "./routes/adminStudentDevices";
 import adminStudentsRouter from "./routes/adminStudents";
+import adminSyncStatusRouter from "./routes/adminSyncStatus";
 import authRouter from "./routes/auth";
 import lecturerAttendanceReportsRouter from "./routes/lecturerAttendanceReports";
 import lecturerAttendanceSessionsRouter from "./routes/lecturerAttendanceSessions";
@@ -23,6 +24,7 @@ import studentAttendanceHistoryRouter from "./routes/studentAttendanceHistory";
 import studentAttendanceRouter from "./routes/studentAttendance";
 import studentDeviceRouter from "./routes/studentDevice";
 import studentRegistrationRouter from "./routes/studentRegistration";
+import internalSyncRouter from "./routes/internalSync";
 
 export const app = express();
 
@@ -62,6 +64,7 @@ app.use("/api/admin", adminCourseOfferingsRouter);
 app.use("/api/admin", adminStudentImportRouter);
 app.use("/api/admin", adminStudentDevicesRouter);
 app.use("/api/admin", adminStudentsRouter);
+app.use("/api/admin", adminSyncStatusRouter);
 app.use("/api/admin", adminAttendanceNetworksRouter);
 app.use("/api/admin", adminAttendanceSessionsRouter);
 app.use("/api/admin", adminAttendanceRecordsRouter);
@@ -74,6 +77,14 @@ app.use("/api/student", studentAttendanceRouter);
 app.use("/api/lecturer", lecturerCatalogRouter);
 app.use("/api/lecturer", lecturerAttendanceSessionsRouter);
 app.use("/api/lecturer", lecturerAttendanceReportsRouter);
+
+// Cloud -> local K12 edge synchronization. Mounted on its own prefix, outside
+// every role router, and guarded by its own edge-credential middleware rather
+// than `requireAuth` - it must never be reachable with a user session.
+// This prefix is also where the edge -> cloud attendance upload lives, so it is
+// both sides' transport. The machine credential in one direction and the user
+// session in the other are never interchangeable.
+app.use("/api/internal/sync", internalSyncRouter);
 
 // Centralized error handler: never leak internal details to clients.
 app.use((err: Error, _req: Request, res: Response, _next: NextFunction) => {

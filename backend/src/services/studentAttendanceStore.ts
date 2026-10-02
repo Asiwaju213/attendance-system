@@ -3,6 +3,7 @@ import {
   EligibleAttendanceSession,
   MarkedAttendance,
 } from "../types/attendanceSession";
+import { enqueueAttendanceMark } from "./syncOutboundQueueStore";
 
 export type EligibleAttendanceResult =
   | { ok: true; data: EligibleAttendanceSession[] }
@@ -194,6 +195,20 @@ export async function markAttendance(
        RETURNING id, marked_at`,
       [attendanceSessionId, studentId, sessionRow.calculated_status]
     );
+
+    // Task 3: queue the mark for the cloud in the SAME transaction. If this throws
+    // the whole marking request rolls back, so the edge can never hold a mark that
+    // is not queued - which would silently lose attendance data on the next uplink.
+    const queueId = await enqueueAttendanceMark(
+      client,
+      Number(inserted.rows[0].id)
+    );
+    if (queueId === null) {
+      // The record was just inserted in this transaction, so this is unreachable
+      // rather than an expected condition. Rolling back is the safe response.
+      await client.query("ROLLBACK");
+      return { ok: false, code: "SESSION_NOT_FOUND" };
+    }
 
     await client.query("COMMIT");
 

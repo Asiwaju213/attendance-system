@@ -1,4 +1,5 @@
 import { pool } from "../db/pool";
+import { appendCourseEvent } from "./syncMasterDataEmitters";
 import { Course, CourseScope } from "../types/course";
 import { OrganizationStatus } from "../types/organization";
 import {
@@ -164,8 +165,10 @@ export async function createCourse(
     }
   }
 
+  const client = await pool.connect();
   try {
-    const result = await pool.query(
+    await client.query("BEGIN");
+    const result = await client.query(
       `WITH inserted AS (
          INSERT INTO courses (course_code, title, level_id, faculty_id, department_id)
          VALUES ($1, $2, $3, $4, $5)
@@ -183,12 +186,17 @@ export async function createCourse(
         input.departmentId ?? null,
       ]
     );
+    await appendCourseEvent(client, "CREATED", Number(result.rows[0].id));
+    await client.query("COMMIT");
     return { ok: true, data: toCourse(result.rows[0] as CourseRow) };
   } catch (error) {
+    await client.query("ROLLBACK").catch(() => undefined);
     if (pgErrorCode(error) === "23505") {
       return { ok: false, code: "CONFLICT" };
     }
     throw error;
+  } finally {
+    client.release();
   }
 }
 
@@ -234,8 +242,10 @@ export async function updateCourse(
   const values = fields.map(([, value]) => value);
   values.push(id);
 
+  const client = await pool.connect();
   try {
-    const result = await pool.query(
+    await client.query("BEGIN");
+    const result = await client.query(
       `WITH updated AS (
          UPDATE courses
          SET ${sets.join(", ")}
@@ -247,13 +257,19 @@ export async function updateCourse(
     );
     const row = result.rows[0] as CourseRow | undefined;
     if (!row) {
+      await client.query("ROLLBACK");
       return { ok: false, code: "NOT_FOUND" };
     }
+    await appendCourseEvent(client, "UPDATED", id);
+    await client.query("COMMIT");
     return { ok: true, data: toCourse(row) };
   } catch (error) {
+    await client.query("ROLLBACK").catch(() => undefined);
     if (pgErrorCode(error) === "23505") {
       return { ok: false, code: "CONFLICT" };
     }
     throw error;
+  } finally {
+    client.release();
   }
 }

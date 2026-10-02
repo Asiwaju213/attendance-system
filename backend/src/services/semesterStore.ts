@@ -1,4 +1,5 @@
 import { pool } from "../db/pool";
+import { appendSemesterEvent } from "./syncMasterDataEmitters";
 import { Semester } from "../types/academicPeriod";
 import {
   SemesterCreateInput,
@@ -46,19 +47,26 @@ export async function listSemesters(): Promise<Semester[]> {
 export async function createSemester(
   input: SemesterCreateInput
 ): Promise<SemesterWriteResult<Semester>> {
+  const client = await pool.connect();
   try {
-    const result = await pool.query(
+    await client.query("BEGIN");
+    const result = await client.query(
       `INSERT INTO semesters (name)
        VALUES ($1)
        RETURNING ${SEMESTER_COLUMNS}`,
       [input.name]
     );
+    await appendSemesterEvent(client, "CREATED", Number(result.rows[0].id));
+    await client.query("COMMIT");
     return { ok: true, data: toSemester(result.rows[0] as SemesterRow) };
   } catch (error) {
+    await client.query("ROLLBACK").catch(() => undefined);
     if (pgErrorCode(error) === "23505") {
       return { ok: false, code: "CONFLICT" };
     }
     throw error;
+  } finally {
+    client.release();
   }
 }
 
@@ -66,8 +74,10 @@ export async function updateSemester(
   id: number,
   input: SemesterUpdateInput
 ): Promise<SemesterWriteResult<Semester>> {
+  const client = await pool.connect();
   try {
-    const result = await pool.query(
+    await client.query("BEGIN");
+    const result = await client.query(
       `UPDATE semesters
        SET name = $1
        WHERE id = $2
@@ -76,13 +86,19 @@ export async function updateSemester(
     );
     const row = result.rows[0] as SemesterRow | undefined;
     if (!row) {
+      await client.query("ROLLBACK");
       return { ok: false, code: "SEMESTER_NOT_FOUND" };
     }
+    await appendSemesterEvent(client, "UPDATED", id);
+    await client.query("COMMIT");
     return { ok: true, data: toSemester(row) };
   } catch (error) {
+    await client.query("ROLLBACK").catch(() => undefined);
     if (pgErrorCode(error) === "23505") {
       return { ok: false, code: "CONFLICT" };
     }
     throw error;
+  } finally {
+    client.release();
   }
 }

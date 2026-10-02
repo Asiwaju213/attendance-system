@@ -1,4 +1,5 @@
 import { pool } from "../src/db/pool";
+import { appendLecturerEvent } from "../src/services/syncMasterDataEmitters";
 import { getTestDatabaseName } from "../src/config/testDatabase";
 import { hashPassword } from "../src/lib/passwords";
 
@@ -432,13 +433,30 @@ async function seed(): Promise<void> {
       );
       studentProfileIds.set(user.matricNumber, Number(student.rows[0].id));
     } else if (user.role === "LECTURER" && user.staffId !== null) {
-      const lecturer = await pool.query(
-        `INSERT INTO lecturers (user_id, staff_id, department_id)
-         VALUES ($1, $2, $3)
-         RETURNING id`,
-        [userId, user.staffId, departmentId]
-      );
-      lecturerProfileIds.set(user.staffId, Number(lecturer.rows[0].id));
+      // Lecturer profiles have no runtime creation path in the application, so
+      // this seeder is the only place they come into existence. Emitting the
+      // change event here keeps `sync_lecturers` populated on a seeded database
+      // and exercises the same transactional path a future provisioning endpoint
+      // would use.
+      const client = await pool.connect();
+      try {
+        await client.query("BEGIN");
+        const lecturer = await client.query(
+          `INSERT INTO lecturers (user_id, staff_id, department_id)
+           VALUES ($1, $2, $3)
+           RETURNING id`,
+          [userId, user.staffId, departmentId]
+        );
+        const lecturerId = Number(lecturer.rows[0].id);
+        await appendLecturerEvent(client, "CREATED", lecturerId);
+        await client.query("COMMIT");
+        lecturerProfileIds.set(user.staffId, lecturerId);
+      } catch (error) {
+        await client.query("ROLLBACK").catch(() => undefined);
+        throw error;
+      } finally {
+        client.release();
+      }
     }
   }
 

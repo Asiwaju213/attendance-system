@@ -3,6 +3,7 @@ import {
   AdminAttendanceRecord,
   AttendanceRecordStatus,
 } from "../types/attendanceSession";
+import { enqueueAttendanceMark } from "./syncOutboundQueueStore";
 
 export type CorrectAttendanceRecordErrorCode =
   | "RECORD_NOT_FOUND"
@@ -78,6 +79,25 @@ export async function correctAttendanceRecord(
         `Admin corrected attendance record ${recordId} for student ${row.student_name} (${row.matric_number}) on course ${row.course_code} (${row.course_title}) (session ${row.session_id}): status changed from ${previousStatus} to ${newStatus}.`,
       ]
     );
+
+    // Task 5: a correction is attendance data too, so it must reach the cloud like
+    // any other mark. Re-queued in THIS transaction so the edge can never end up
+    // having corrected a record locally with no upload pending for it - the one
+    // failure mode that would leave the cloud permanently disagreeing with the edge
+    // about a student's attendance, and with nothing left to trigger a retry.
+    //
+    // This re-states the existing queue row (see UNIQUE attendance_record_id),
+    // returning it to PENDING with the new status. The cloud then treats it as a
+    // correction against the same (session, student) record rather than a second,
+    // conflicting mark. mark_time is re-read from the record, so the ORIGINAL marking
+    // time is preserved rather than being rewritten to the time of the correction.
+    const queueId = await enqueueAttendanceMark(client, recordId);
+    if (queueId === null) {
+      // Unreachable: the row was locked by the SELECT above in this transaction.
+      // Rolling back is the only safe response to an inconsistency this basic.
+      await client.query("ROLLBACK");
+      return { ok: false, code: "RECORD_NOT_FOUND" };
+    }
 
     await client.query("COMMIT");
 

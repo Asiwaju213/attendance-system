@@ -1,4 +1,5 @@
 import { pool } from "../db/pool";
+import { appendLocationEvent } from "./syncMasterDataEmitters";
 import { ActiveLocationForLecturer, AttendanceLocation } from "../types/location";
 import { OrganizationStatus } from "../types/organization";
 import {
@@ -92,13 +93,24 @@ export async function findLocationById(
 export async function createLocation(
   input: LocationCreateInput
 ): Promise<LocationWriteResult<AttendanceLocation>> {
-  const result = await pool.query(
-    `INSERT INTO locations (name, description)
-     VALUES ($1, $2)
-     RETURNING id, name, description, status, created_at, updated_at`,
-    [input.name, input.description]
-  );
-  return { ok: true, data: toLocation(result.rows[0] as LocationRow) };
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const result = await client.query(
+      `INSERT INTO locations (name, description)
+       VALUES ($1, $2)
+       RETURNING id, name, description, status, created_at, updated_at`,
+      [input.name, input.description]
+    );
+    await appendLocationEvent(client, "CREATED", Number(result.rows[0].id));
+    await client.query("COMMIT");
+    return { ok: true, data: toLocation(result.rows[0] as LocationRow) };
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => undefined);
+    throw error;
+  } finally {
+    client.release();
+  }
 }
 
 export async function updateLocation(
@@ -114,16 +126,28 @@ export async function updateLocation(
   const values = fields.map(([, value]) => value);
   values.push(id);
 
-  const result = await pool.query(
-    `UPDATE locations
-     SET ${sets.join(", ")}
-     WHERE id = $${fields.length + 1}
-     RETURNING id, name, description, status, created_at, updated_at`,
-    values
-  );
-  const row = result.rows[0] as LocationRow | undefined;
-  if (!row) {
-    return { ok: false, code: "NOT_FOUND" };
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const result = await client.query(
+      `UPDATE locations
+       SET ${sets.join(", ")}
+       WHERE id = $${fields.length + 1}
+       RETURNING id, name, description, status, created_at, updated_at`,
+      values
+    );
+    const row = result.rows[0] as LocationRow | undefined;
+    if (!row) {
+      await client.query("ROLLBACK");
+      return { ok: false, code: "NOT_FOUND" };
+    }
+    await appendLocationEvent(client, "UPDATED", id);
+    await client.query("COMMIT");
+    return { ok: true, data: toLocation(row) };
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => undefined);
+    throw error;
+  } finally {
+    client.release();
   }
-  return { ok: true, data: toLocation(row) };
 }

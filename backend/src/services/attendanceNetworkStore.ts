@@ -1,4 +1,5 @@
 import { pool } from "../db/pool";
+import { appendAttendanceNetworkEvent } from "./syncMasterDataEmitters";
 import { ActiveNetworkForLecturer, AttendanceNetwork } from "../types/attendanceNetwork";
 import { OrganizationStatus } from "../types/organization";
 import {
@@ -92,19 +93,30 @@ export async function findAttendanceNetworkById(
 export async function createAttendanceNetwork(
   input: AttendanceNetworkCreateInput
 ): Promise<AttendanceNetworkWriteResult<AttendanceNetwork>> {
+  const client = await pool.connect();
   try {
-    const result = await pool.query(
+    await client.query("BEGIN");
+    const result = await client.query(
       `INSERT INTO attendance_networks (network_code, name)
        VALUES ($1, $2)
        RETURNING id, network_code, name, status, created_at, updated_at`,
       [input.networkCode, input.name]
     );
+    await appendAttendanceNetworkEvent(
+      client,
+      "CREATED",
+      Number(result.rows[0].id)
+    );
+    await client.query("COMMIT");
     return { ok: true, data: toNetwork(result.rows[0] as AttendanceNetworkRow) };
   } catch (error) {
+    await client.query("ROLLBACK").catch(() => undefined);
     if (pgErrorCode(error) === "23505") {
       return { ok: false, code: "CONFLICT" };
     }
     throw error;
+  } finally {
+    client.release();
   }
 }
 
@@ -120,16 +132,28 @@ export async function updateAttendanceNetwork(
   const values = fields.map(([, value]) => value);
   values.push(id);
 
-  const result = await pool.query(
-    `UPDATE attendance_networks
-     SET ${sets.join(", ")}
-     WHERE id = $${fields.length + 1}
-     RETURNING id, network_code, name, status, created_at, updated_at`,
-    values
-  );
-  const row = result.rows[0] as AttendanceNetworkRow | undefined;
-  if (!row) {
-    return { ok: false, code: "NOT_FOUND" };
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const result = await client.query(
+      `UPDATE attendance_networks
+       SET ${sets.join(", ")}
+       WHERE id = $${fields.length + 1}
+       RETURNING id, network_code, name, status, created_at, updated_at`,
+      values
+    );
+    const row = result.rows[0] as AttendanceNetworkRow | undefined;
+    if (!row) {
+      await client.query("ROLLBACK");
+      return { ok: false, code: "NOT_FOUND" };
+    }
+    await appendAttendanceNetworkEvent(client, "UPDATED", id);
+    await client.query("COMMIT");
+    return { ok: true, data: toNetwork(row) };
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => undefined);
+    throw error;
+  } finally {
+    client.release();
   }
-  return { ok: true, data: toNetwork(row) };
 }

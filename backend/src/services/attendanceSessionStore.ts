@@ -1,4 +1,6 @@
+import type { PoolClient } from "pg";
 import { pool } from "../db/pool";
+import { appendAttendanceSessionEvent } from "./syncChangeEventStore";
 import {
   AdminAttendanceRecord,
   AdminAttendanceSession,
@@ -40,6 +42,10 @@ export type EndSessionResult =
 interface SessionRow {
   id: string;
   course_offering_id: string;
+  // Read so a synchronization event can name the lecturer who started the
+  // session. `toSession` deliberately ignores it: the lecturer-facing response
+  // shape is unchanged by this column being selected.
+  started_by_lecturer_id: string;
   course_code: string;
   course_title: string;
   attendance_network_id: string;
@@ -55,7 +61,8 @@ interface SessionRow {
 }
 
 const SESSION_SELECT = `
-  SELECT s.id, s.course_offering_id, c.course_code, c.title AS course_title,
+  SELECT s.id, s.course_offering_id, s.started_by_lecturer_id,
+         c.course_code, c.title AS course_title,
          s.attendance_network_id, n.name AS network_name,
          s.location_id, l.name AS location_name,
          s.start_time, s.end_time,
@@ -74,6 +81,35 @@ const SESSION_SELECT = `
 `;
 
 const UNIQUE_VIOLATION_CODE = "23505";
+
+/**
+ * The lecturer's display name and staff id, for the synchronized session payload.
+ *
+ * Read on the caller's own client so it is part of the same transaction as the
+ * event. Fetched here rather than added to `SESSION_SELECT` deliberately: it is
+ * needed only by the feed, and widening the session's domain shape (and every
+ * caller of it) to carry a field nothing else reads would be a larger change
+ * than the feature needs.
+ */
+async function lecturerDisplay(
+  client: PoolClient,
+  lecturerId: number
+): Promise<{ name: string; staffId: string }> {
+  const result = await client.query(
+    `SELECT lec.staff_id, u.name
+     FROM lecturers lec
+     JOIN users u ON u.id = lec.user_id
+     WHERE lec.id = $1`,
+    [lecturerId]
+  );
+  const row = result.rows[0];
+  if (!row) {
+    throw new Error(
+      `Lecturer ${lecturerId} has no profile row, so its attendance session cannot be synchronized.`
+    );
+  }
+  return { name: row.name as string, staffId: row.staff_id as string };
+}
 
 function isUniqueViolation(error: unknown): boolean {
   return (
@@ -238,7 +274,7 @@ export async function createAttendanceSession(
           location_id, start_time, end_time, late_threshold, status)
        VALUES ($1, $2, $3, $4, now(), now() + ($5 * interval '1 minute'),
                ($6 * interval '1 minute'), 'ACTIVE')
-       RETURNING id`,
+       RETURNING id, sync_id`,
       [
         input.courseOfferingId,
         lecturerId,
@@ -249,11 +285,13 @@ export async function createAttendanceSession(
       ]
     );
     const sessionId = Number(inserted.rows[0].id);
+    const sessionSyncId = inserted.rows[0].sync_id as string;
 
     const fullRow = await client.query(`${SESSION_SELECT} WHERE s.id = $1`, [
       sessionId,
     ]);
-    const session = toSession(fullRow.rows[0]);
+    const sessionRow = fullRow.rows[0];
+    const session = toSession(sessionRow);
 
     await client.query(
       `INSERT INTO audit_logs (user_id, action, entity_type, entity_id, description)
@@ -263,6 +301,37 @@ export async function createAttendanceSession(
         sessionId,
         `Attendance session ${sessionId} started for course offering ${input.courseOfferingId}.`,
       ]
+    );
+
+    // Written on the same `client`, before the COMMIT below, so the feed can never
+    // be missing a change for a session that was successfully created. If this
+    // insert fails, the surrounding catch rolls the session back with it.
+    const lecturer = await lecturerDisplay(client, lecturerId);
+
+    await appendAttendanceSessionEvent(
+      client,
+      "attendance_session",
+      sessionSyncId,
+      "CREATED",
+      {
+        syncId: sessionSyncId,
+        cloudSessionId: sessionId,
+        cloudLecturerId: lecturerId,
+        session: {
+          courseOfferingId: session.courseOfferingId,
+          attendanceNetworkId: session.attendanceNetworkId,
+          locationId: session.locationId,
+          courseCode: session.courseCode,
+          courseTitle: session.courseTitle,
+          lecturerDisplayName: lecturer.name,
+          lecturerStaffId: lecturer.staffId,
+          startTime: session.startTime,
+          endTime: session.endTime,
+          lateThresholdMinutes: session.lateThresholdMinutes,
+          status: session.status,
+          endedAt: session.endedAt,
+        },
+      }
     );
 
     await client.query("COMMIT");
@@ -296,7 +365,7 @@ export async function endSession(
        SET status = 'ENDED', ended_at = now()
        WHERE id = $1 AND started_by_lecturer_id = $2
          AND status = 'ACTIVE' AND end_time > now()
-       RETURNING id`,
+       RETURNING id, sync_id`,
       [sessionId, lecturerId]
     );
 
@@ -318,6 +387,7 @@ export async function endSession(
     }
 
     const endedId = Number(ended.rows[0].id);
+    const endedSyncId = ended.rows[0].sync_id as string;
     const fullRow = await client.query(`${SESSION_SELECT} WHERE s.id = $1`, [
       endedId,
     ]);
@@ -331,6 +401,37 @@ export async function endSession(
         endedId,
         `Attendance session ${endedId} ended manually by lecturer.`,
       ]
+    );
+
+    const endedLecturer = await lecturerDisplay(client, lecturerId);
+
+    // Same-transaction closure event. It carries the full post-close session, so
+    // the edge overwrites its local copy rather than having to know what the row
+    // looked like when it was ACTIVE.
+    await appendAttendanceSessionEvent(
+      client,
+      "attendance_session",
+      endedSyncId,
+      "CLOSED",
+      {
+        syncId: endedSyncId,
+        cloudSessionId: endedId,
+        cloudLecturerId: lecturerId,
+        session: {
+          courseOfferingId: session.courseOfferingId,
+          attendanceNetworkId: session.attendanceNetworkId,
+          locationId: session.locationId,
+          courseCode: session.courseCode,
+          courseTitle: session.courseTitle,
+          lecturerDisplayName: endedLecturer.name,
+          lecturerStaffId: endedLecturer.staffId,
+          startTime: session.startTime,
+          endTime: session.endTime,
+          lateThresholdMinutes: session.lateThresholdMinutes,
+          status: session.status,
+          endedAt: session.endedAt,
+        },
+      }
     );
 
     await client.query("COMMIT");
