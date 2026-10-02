@@ -6,6 +6,10 @@ import { app } from "../src/app";
 import { authConfig } from "../src/config/auth";
 import { pool } from "../src/db/pool";
 import { hashPassword } from "../src/lib/passwords";
+import {
+  deviceBindingHeader,
+  ensureActiveDiscoverableDevice,
+} from "./studentSessionTestHelpers";
 
 /**
  * Admin Course Enrollment integration tests.
@@ -100,9 +104,15 @@ async function getAdminToken(): Promise<string> {
 }
 
 async function getStudentToken(matricNumber: string): Promise<string> {
+  // A password alone no longer authenticates a student: the request must also present the
+  // device that is enrolled to the account.
+  const credentialId = await ensureActiveDiscoverableDevice(matricNumber);
   const login = await fetch(`${baseUrl}/api/auth/student/login`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: {
+      "Content-Type": "application/json",
+      ...deviceBindingHeader(credentialId),
+    },
     body: JSON.stringify({ matricNumber, password: TEST_PASSWORD }),
   });
   assert.equal(login.status, 200);

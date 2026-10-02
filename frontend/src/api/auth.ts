@@ -55,11 +55,59 @@ export function isUnauthorizedError(error: unknown): boolean {
   return error instanceof ApiError && error.status === 401;
 }
 
-export function studentLogin(matricNumber: string, password: string): Promise<User> {
-  return apiRequest<AuthResponse>("/auth/student/login", {
-    method: "POST",
-    body: { matricNumber, password },
-  }).then((data) => data.user);
+/**
+ * Outcome of a matric number + password login.
+ *
+ * The backend only mints a normal session when the browser presents a valid device binding. A
+ * login with no device binding therefore never returns a user, and instead returns one of two
+ * non-session outcomes:
+ *
+ *   - `enrollmentRequired` — the student has no enrolled device and has been issued a scoped,
+ *     short-lived enrollment grant. The client must run the enrollment ceremony.
+ *   - `deviceAlreadyEnrolled` — an active device exists. No session and no grant were issued, so
+ *     this device cannot enrol and an administrator must reset the device first.
+ */
+export type StudentLoginResult =
+  | { outcome: "authenticated"; user: User }
+  | { outcome: "enrollmentRequired" }
+  | { outcome: "deviceAlreadyEnrolled" };
+
+interface StudentLoginResponse {
+  user?: User;
+  enrollmentRequired?: boolean;
+}
+
+export async function studentLogin(
+  matricNumber: string,
+  password: string
+): Promise<StudentLoginResult> {
+  try {
+    const data = await apiRequest<StudentLoginResponse>("/auth/student/login", {
+      method: "POST",
+      body: { matricNumber, password },
+    });
+
+    if (data.user) {
+      return { outcome: "authenticated", user: data.user };
+    }
+    if (data.enrollmentRequired === true) {
+      return { outcome: "enrollmentRequired" };
+    }
+    return { outcome: "deviceAlreadyEnrolled" };
+  } catch (error) {
+    // The backend refuses the request outright when a device is already active: no session and
+    // no grant are issued. That is an expected decision, not a failure to authenticate, so it
+    // is mapped to an outcome here instead of being thrown at the caller as an ApiError. Every
+    // other error propagates unchanged and is rendered as a generic failure.
+    if (
+      error instanceof ApiError &&
+      error.status === 409 &&
+      error.code === "DEVICE_ALREADY_ENROLLED"
+    ) {
+      return { outcome: "deviceAlreadyEnrolled" };
+    }
+    throw error;
+  }
 }
 
 export function lecturerLogin(staffId: string, password: string): Promise<User> {

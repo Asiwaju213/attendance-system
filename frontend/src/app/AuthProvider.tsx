@@ -40,14 +40,45 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setStatus("authenticated");
   }, []);
 
+  /**
+   * Sign in with a matric number and password.
+   *
+   * Only the `authenticated` outcome establishes a session here. The backend deliberately refuses
+   * to mint one from a matric number and password alone, so the other two outcomes (a
+   * first-device enrollment grant, or a refusal because another device is already enrolled) must
+   * leave the auth state untouched — calling `applySession` for those would tell the app the
+   * student is signed in when no `oou_session` exists.
+   */
   const loginStudent = useCallback(
     async (matricNumber: string, password: string) => {
-      const nextUser = await authApi.studentLogin(matricNumber, password);
-      applySession(nextUser);
-      return nextUser;
+      const result = await authApi.studentLogin(matricNumber, password);
+      if (result.outcome === "authenticated") {
+        applySession(result.user);
+      }
+      return result;
     },
     [applySession]
   );
+
+  /**
+   * Re-read the current user from the server.
+   *
+   * Needed after a first-device enrollment: the backend promotes the enrollment grant into a
+   * normal session as part of the ceremony, so the session exists but this client never saw the
+   * login response that created it.
+   */
+  const refreshCurrentUser = useCallback(async (): Promise<User | null> => {
+    try {
+      const currentUser = await authApi.getCurrentUser();
+      setUser(currentUser);
+      setStatus(currentUser === null ? "unauthenticated" : "authenticated");
+      return currentUser;
+    } catch {
+      setUser(null);
+      setStatus("unauthenticated");
+      return null;
+    }
+  }, []);
 
   /**
    * Device-identified student login. The assertion is the only identity input; the account is
@@ -118,6 +149,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       loginLecturer,
       loginAdmin,
       registerStudent,
+      refreshCurrentUser,
       logout,
     }),
     [
@@ -128,6 +160,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       loginLecturer,
       loginAdmin,
       registerStudent,
+      refreshCurrentUser,
       logout
     ]
   );

@@ -76,6 +76,50 @@ export async function requireAuth(
   }
 }
 
+/**
+ * Populate `req.user` when a valid session cookie is present, and continue either way.
+ *
+ * Unlike `requireAuth` this never rejects the request. It exists for routers that accept two
+ * different proofs of identity, where "no session" is a legitimate state rather than a failure:
+ * the student device router admits either a normal session or a scoped enrollment grant, and a
+ * grant-only request must be allowed to proceed to the check that understands grants.
+ *
+ * A session that is present but invalid (expired, revoked, or belonging to a deactivated user) is
+ * treated as no session here. The caller then decides the outcome, so a dead session cannot
+ * silently authenticate anything.
+ */
+export async function loadSessionIfPresent(
+  req: Request,
+  _res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    const token = getSessionToken(req);
+    if (!token) {
+      next();
+      return;
+    }
+
+    const session = await findSessionByTokenHash(hashSessionToken(token));
+    if (!session || !isSessionActive(session)) {
+      next();
+      return;
+    }
+
+    const user = await findActiveUserById(session.user_id);
+    if (user) {
+      req.user = user;
+      updateLastSeen(session.id).catch(() => undefined);
+    }
+    next();
+  } catch (error) {
+    // Do not fail closed here in a way that hides an enrollment grant behind a 500: an error while
+    // reading the session is not an error with the grant. Log it and let the caller decide.
+    console.error("Optional session check failed.", (error as Error).message);
+    next();
+  }
+}
+
 export function requireRole(...roles: Role[]): RequestHandler {
   return (req: Request, res: Response, next: NextFunction) => {
     if (!req.user) {

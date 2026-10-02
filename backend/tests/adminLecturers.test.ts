@@ -6,6 +6,7 @@ import { app } from "../src/app";
 import { authConfig } from "../src/config/auth";
 import { pool } from "../src/db/pool";
 import { hashPassword } from "../src/lib/passwords";
+import { boundDeviceHeaders } from "./studentSessionTestHelpers";
 
 const TEST_PASSWORD = "admin-lecturer-test-password";
 const ADMIN_USERNAME = "admin_lec_admin";
@@ -196,7 +197,7 @@ test("lecturer listing rejects students", async () => {
   const login = await postJson("/api/auth/student/login", {
     matricNumber: STUDENT_MATRIC,
     password: TEST_PASSWORD,
-  });
+  }, await boundDeviceHeaders(STUDENT_MATRIC));
   const token = cookieFrom(login);
   assert.ok(token);
 

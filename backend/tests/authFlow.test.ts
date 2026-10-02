@@ -8,6 +8,11 @@ import { pool } from "../src/db/pool";
 import { hashPassword } from "../src/lib/passwords";
 import { hashSessionToken } from "../src/lib/sessions";
 import { requireAdmin, requireAuth } from "../src/middleware/authenticate";
+import {
+  boundDeviceHeaders,
+  deviceBindingHeader,
+  ensureActiveDiscoverableDevice,
+} from "./studentSessionTestHelpers";
 
 const TEST_PASSWORD = "auth-flow-test-password";
 const ONE_HOUR_MS = 60 * 60 * 1000;
@@ -192,6 +197,21 @@ function assertGenericCredentialFailure(body: unknown): void {
   assert.deepEqual(body, { error: "INVALID_CREDENTIALS" });
 }
 
+/**
+ * Drop any enrollment grants issued to a student during this file.
+ *
+ * A matric+password login against a student with no ACTIVE device leaves an ACTIVE grant behind,
+ * and `student_device_enrollment_grants.student_id` is `ON DELETE RESTRICT`, so a leftover row
+ * would make this file's own `DELETE FROM students` cleanup fail.
+ */
+async function clearGrantsForMatric(matricNumber: string): Promise<void> {
+  await pool.query(
+    `DELETE FROM student_device_enrollment_grants
+      WHERE student_id = (SELECT id FROM students WHERE matric_number = $1)`,
+    [matricNumber]
+  );
+}
+
 function assertSafeUser(
   user: Record<string, unknown>,
   role: string,
@@ -209,20 +229,86 @@ function assertSafeUser(
   assert.ok(!("session_token_hash" in user), "must never expose the token hash");
 }
 
-test("student login with valid credentials succeeds (matric+password fallback)", async () => {
+// ---------------------------------------------------------------------------
+// Student login is decided by device state
+// ---------------------------------------------------------------------------
+
+test("matric+password on an unbound device issues an enrollment grant, not a session", async () => {
   const res = await postJson("/api/auth/student/login", {
     matricNumber: userCreds.activeStudent.matricNumber,
     password: TEST_PASSWORD,
   });
 
   assert.equal(res.status, 200);
+  const body = (await res.json()) as Record<string, unknown>;
+
+  // The whole response is the instruction to enroll. Nothing about the account is disclosed
+  // beyond the fact that the credentials were accepted.
+  assert.deepEqual(body, { enrollmentRequired: true });
+
+  const setCookie = res.headers.getSetCookie();
+  assert.equal(
+    setCookie.filter((c) => c.startsWith(`${authConfig.cookieName}=`)).length,
+    0,
+    "a password alone must never create a session"
+  );
+
+  const grantCookie = setCookie.find((c) =>
+    c.startsWith(`${authConfig.enrollmentGrantCookieName}=`)
+  );
+  assert.ok(grantCookie, "an enrollment grant cookie must be issued");
+  assert.ok(grantCookie.includes("HttpOnly"), "the grant cookie must be HttpOnly");
+  assert.ok(grantCookie.includes("SameSite=Lax"), "the grant cookie must be SameSite=Lax");
+
+  // The grant authorizes device enrollment only. It must not open any normal student API.
+  const grantValue = grantCookie.slice(
+    grantCookie.indexOf("=") + 1,
+    grantCookie.indexOf(";")
+  );
+  const meRes = await get(
+    "/api/auth/me",
+    { cookie: `${authConfig.enrollmentGrantCookieName}=${grantValue}` }
+  );
+  assert.equal(meRes.status, 401, "an enrollment grant must not authenticate normal APIs");
+
+  const attendanceRes = await get(
+    "/api/student/attendance/history",
+    { cookie: `${authConfig.enrollmentGrantCookieName}=${grantValue}` }
+  );
+  assert.equal(
+    attendanceRes.status,
+    401,
+    "an enrollment grant must not authorize a normal student endpoint"
+  );
+
+  await clearGrantsForMatric(userCreds.activeStudent.matricNumber);
+});
+
+test("student login with valid credentials succeeds on a bound device", async () => {
+  const credentialId = await ensureActiveDiscoverableDevice(
+    userCreds.activeStudent.matricNumber
+  );
+
+  const res = await postJson(
+    "/api/auth/student/login",
+    {
+      matricNumber: userCreds.activeStudent.matricNumber,
+      password: TEST_PASSWORD,
+    },
+    deviceBindingHeader(credentialId)
+  );
+
+  assert.equal(res.status, 200);
   const body = (await res.json()) as { user: Record<string, unknown> };
   const setCookie = res.headers.getSetCookie();
-  // Fallback matric+password login only sets the session cookie.
-  // Device-binding cookie is set only during enrollment completion.
-  assert.ok(setCookie.length === 1, "only session cookie should be set for fallback login");
-  assert.ok(setCookie[0].startsWith(`${authConfig.cookieName}=`), "session cookie must be set");
-  assert.ok(setCookie[0].includes("HttpOnly"), "cookie must be HttpOnly");
+  assert.ok(
+    setCookie.some((c) => c.startsWith(`${authConfig.cookieName}=`)),
+    "session cookie must be set"
+  );
+  const sessionCookie = setCookie.find((c) =>
+    c.startsWith(`${authConfig.cookieName}=`)
+  )!;
+  assert.ok(sessionCookie.includes("HttpOnly"), "cookie must be HttpOnly");
   assertSafeUser(body.user, "STUDENT", "matricNumber", userCreds.activeStudent.matricNumber);
 });
 
@@ -352,11 +438,18 @@ test("malformed login requests are rejected with INVALID_REQUEST", async () => {
 });
 
 test("a role supplied by the client is ignored", async () => {
-  const res = await postJson("/api/auth/student/login", {
-    matricNumber: userCreds.activeStudent.matricNumber,
-    password: TEST_PASSWORD,
-    role: "ADMIN",
-  });
+  const credentialId = await ensureActiveDiscoverableDevice(
+    userCreds.activeStudent.matricNumber
+  );
+  const res = await postJson(
+    "/api/auth/student/login",
+    {
+      matricNumber: userCreds.activeStudent.matricNumber,
+      password: TEST_PASSWORD,
+      role: "ADMIN",
+    },
+    deviceBindingHeader(credentialId)
+  );
 
   assert.equal(res.status, 200);
   const body = (await res.json()) as { user: Record<string, unknown> };
@@ -429,10 +522,17 @@ test("a revoked session fails authentication", async () => {
 });
 
 test("an expired session fails authentication", async () => {
-  const login = await postJson("/api/auth/student/login", {
-    matricNumber: userCreds.activeStudent.matricNumber,
-    password: TEST_PASSWORD,
-  });
+  const credentialId = await ensureActiveDiscoverableDevice(
+    userCreds.activeStudent.matricNumber
+  );
+  const login = await postJson(
+    "/api/auth/student/login",
+    {
+      matricNumber: userCreds.activeStudent.matricNumber,
+      password: TEST_PASSWORD,
+    },
+    deviceBindingHeader(credentialId)
+  );
   const token = cookieFrom(login);
   assert.ok(token);
 
@@ -459,8 +559,12 @@ test("logout revokes the session, keeps the row, and clears the session cookie",
   assert.equal(res.status, 200);
 
   const cleared = res.headers.getSetCookie();
-  assert.ok(cleared.length === 1, "logout must clear the session cookie");
-  assert.ok(cleared[0].startsWith(`${authConfig.cookieName}=`));
+  // The session cookie must be cleared. Logout additionally clears any outstanding enrollment
+  // grant, so the count is no longer fixed at one.
+  assert.ok(
+    cleared.some((c) => c.startsWith(`${authConfig.cookieName}=`)),
+    "logout must clear the session cookie"
+  );
 
   const stored = await pool.query(
     `SELECT revoked_at FROM sessions WHERE user_id = $1 ORDER BY id DESC LIMIT 1`,
@@ -473,29 +577,49 @@ test("logout revokes the session, keeps the row, and clears the session cookie",
   assert.equal(afterLogout.status, 401, "revoked session must no longer work");
 });
 
-test("student logout preserves the device-binding cookie", async () => {
-  // First log in as a student with matric+password (no device-binding cookie yet)
-  const login = await postJson("/api/auth/student/login", {
-    matricNumber: userCreds.activeStudent.matricNumber,
-    password: TEST_PASSWORD,
-  });
+test("student logout preserves the device-binding cookie but drops any enrollment grant", async () => {
+  const credentialId = await ensureActiveDiscoverableDevice(
+    userCreds.activeStudent.matricNumber
+  );
+
+  // Sign in from the bound device, as a returning student does.
+  const login = await postJson(
+    "/api/auth/student/login",
+    {
+      matricNumber: userCreds.activeStudent.matricNumber,
+      password: TEST_PASSWORD,
+    },
+    deviceBindingHeader(credentialId)
+  );
   const token = cookieFrom(login);
   assert.ok(token);
 
-  // Matric+password login does NOT set a device-binding cookie (that's set during enrollment)
-  const deviceBindingToken = login.headers.getSetCookie().find(c => c.startsWith(`${authConfig.deviceBindingCookieName}=`));
-  assert.ok(!deviceBindingToken, "matric+password login must NOT set device-binding cookie");
+  // A bound-device login re-issues the device-binding cookie for the verified device; it must
+  // still never set one for an unbound request, which the enrollment-grant test above covers.
+  assert.ok(
+    login.headers
+      .getSetCookie()
+      .some((c) => c.startsWith(`${authConfig.deviceBindingCookieName}=`)),
+    "a bound-device login must refresh the device-binding cookie"
+  );
 
-  // Now logout
   const res = await postJson("/api/auth/logout", {}, cookieHeader(token));
   assert.equal(res.status, 200);
 
   const cleared = res.headers.getSetCookie();
-  // Should clear only the session cookie
-  assert.ok(cleared.length === 1, "logout must clear only the session cookie");
-  assert.ok(cleared[0].startsWith(`${authConfig.cookieName}=`));
-  const clearedDeviceBinding = cleared.find(c => c.startsWith(`${authConfig.deviceBindingCookieName}=`));
+  assert.ok(
+    cleared.some((c) => c.startsWith(`${authConfig.cookieName}=`)),
+    "logout must clear the session cookie"
+  );
+  const clearedDeviceBinding = cleared.find((c) =>
+    c.startsWith(`${authConfig.deviceBindingCookieName}=`)
+  );
   assert.ok(!clearedDeviceBinding, "logout must NOT clear the device-binding cookie");
+  // Signing out must not leave a live enrollment authorization behind in the browser.
+  assert.ok(
+    cleared.some((c) => c.startsWith(`${authConfig.enrollmentGrantCookieName}=`)),
+    "logout must clear the enrollment grant cookie"
+  );
 });
 
 test("logout is safe and idempotent when already logged out", async () => {
@@ -504,7 +628,12 @@ test("logout is safe and idempotent when already logged out", async () => {
 
   const bogusToken = await postJson("/api/auth/logout", {}, cookieHeader("not-a-real-session-token"));
   assert.equal(bogusToken.status, 200);
-  assert.equal(bogusToken.headers.getSetCookie().length, 1, "session cookie should still be cleared");
+  assert.ok(
+    bogusToken.headers
+      .getSetCookie()
+      .some((c) => c.startsWith(`${authConfig.cookieName}=`)),
+    "session cookie should still be cleared"
+  );
 });
 
 test("last_seen_at updates without extending expires_at", async () => {
@@ -566,10 +695,14 @@ test("role middleware rejects unauthenticated users and wrong roles", async () =
   const unauthenticated = await get("/api/test/admin-only");
   assert.equal(unauthenticated.status, 401);
 
-  const studentLogin = await postJson("/api/auth/student/login", {
-    matricNumber: userCreds.activeStudent.matricNumber,
-    password: TEST_PASSWORD,
-  });
+  const studentLogin = await postJson(
+    "/api/auth/student/login",
+    {
+      matricNumber: userCreds.activeStudent.matricNumber,
+      password: TEST_PASSWORD,
+    },
+    await boundDeviceHeaders(userCreds.activeStudent.matricNumber)
+  );
   const studentToken = cookieFrom(studentLogin);
 
   const forbidden = await get("/api/test/admin-only", cookieHeader(studentToken!));

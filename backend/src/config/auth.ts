@@ -3,6 +3,11 @@ const REMEMBERED_ACCOUNT_DAYS = 90;
 const REMEMBERED_ACCOUNT_MS = REMEMBERED_ACCOUNT_DAYS * 24 * 60 * 60 * 1000;
 const DEVICE_BINDING_DAYS = 90;
 const DEVICE_BINDING_MS = DEVICE_BINDING_DAYS * 24 * 60 * 60 * 1000;
+// An enrollment grant is only useful for the few minutes between proving a matric number +
+// password and finishing a WebAuthn registration ceremony, so it is deliberately short-lived.
+// A second, independent ceiling (`expires_at` in the database) applies even if a client ignores
+// the cookie's max-age.
+const ENROLLMENT_GRANT_MS = 10 * 60 * 1000;
 
 // In development, use host-only cookies (no Domain attribute) so the browser
 // stores them for the frontend origin (localhost:4173) via the Vite proxy.
@@ -56,6 +61,7 @@ export const authConfig = {
   cookieName: "oou_session",
   rememberedAccountCookieName: "oou_remembered_student",
   deviceBindingCookieName: "oou_device_binding",
+  enrollmentGrantCookieName: "oou_device_enrollment",
 
   // Lifetime of a session (also determines the cookie max-age).
   sessionLifetimeMs: SEVEN_DAYS_MS,
@@ -86,6 +92,21 @@ export const authConfig = {
     path: "/",
     domain: cookieDomain,
   },
+
+  // Server-side lifetime of an enrollment grant. Exposed here so the grant service and its
+  // tests cannot drift apart from the cookie that carries it.
+  enrollmentGrantLifetimeMs: ENROLLMENT_GRANT_MS,
+
+  // Host-only, HttpOnly, Secure-in-production and SameSite=Lax, like every other auth cookie.
+  // There is deliberately no `domain`, so it is never exposed to subdomains.
+  enrollmentGrantCookie: {
+    httpOnly: true,
+    sameSite: "lax" as const,
+    secure: cookieSecure,
+    maxAge: ENROLLMENT_GRANT_MS,
+    path: "/",
+    domain: cookieDomain,
+  },
 };
 
 // Options for clearing the session cookie. Must mirror the cookie that was
@@ -112,4 +133,14 @@ export const clearDeviceBindingCookieOptions = {
   secure: authConfig.deviceBindingCookie.secure,
   path: authConfig.deviceBindingCookie.path,
   domain: authConfig.deviceBindingCookie.domain,
+};
+
+// Options for clearing a spent or invalidated enrollment grant. Must mirror the cookie that was
+// set (secure especially), otherwise the browser may keep presenting it.
+export const clearEnrollmentGrantCookieOptions = {
+  httpOnly: authConfig.enrollmentGrantCookie.httpOnly,
+  sameSite: authConfig.enrollmentGrantCookie.sameSite,
+  secure: authConfig.enrollmentGrantCookie.secure,
+  path: authConfig.enrollmentGrantCookie.path,
+  domain: authConfig.enrollmentGrantCookie.domain,
 };

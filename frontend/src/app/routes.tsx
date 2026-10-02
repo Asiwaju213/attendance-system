@@ -25,7 +25,7 @@ import { StaffLoginPage } from "../pages/StaffLoginPage";
 import { StudentHomePage } from "../pages/StudentHomePage";
 import { StudentAttendancePage } from "../pages/StudentAttendancePage";
 import { StudentAttendanceHistoryPage } from "../pages/StudentAttendanceHistoryPage";
-import { StudentDevicePage } from "../pages/StudentDevicePage";
+import { StudentDevicePage, StudentEnrollDevicePage } from "../pages/StudentDevicePage";
 import { StudentCourseRegistrationPage } from "../pages/StudentCourseRegistrationPage";
 import { StudentLoginPage } from "../pages/StudentLoginPage";
 import { StudentRegisterPage } from "../pages/StudentRegisterPage";
@@ -53,6 +53,32 @@ function GuestOnly({ children }: { children: ReactNode }) {
 
   if (status === "authenticated" && user !== null) {
     return <Navigate to={homePathForRole(user.role)} replace />;
+  }
+
+  return children;
+}
+
+/**
+ * Guard for the first-device enrollment page.
+ *
+ * Allows an unauthenticated visitor through: on this route that visitor is holding a
+ * short-lived enrollment grant, not a session. A student who *does* already have a session has
+ * nothing to enroll, so they are redirected to the normal device page instead.
+ */
+function AuthenticatedStudentOnly({ children }: { children: ReactNode }) {
+  const { status, user } = useAuth();
+
+  if (status === "loading") {
+    return <LoadingPage />;
+  }
+
+  if (status === "authenticated" && user !== null) {
+    return (
+      <Navigate
+        to={user.role === "STUDENT" ? "/app/student/device" : homePathForRole(user.role)}
+        replace
+      />
+    );
   }
 
   return children;
@@ -267,6 +293,25 @@ export function AppRoutes() {
             <ProtectedRoute role="ADMIN">
               <AdminCourseOfferingRosterPage />
             </ProtectedRoute>
+          }
+        />
+        {/*
+          First-device enrollment.
+
+          Deliberately NOT wrapped in `ProtectedRoute`: on this route the student is holding a
+          short-lived enrollment grant, not a session. The backend only issues the grant when no
+          ACTIVE device exists and refuses to create a session until the ceremony commits, so
+          requiring a session here would make first-device enrollment unreachable.
+
+          If the student already has a session there is nothing to enroll, so they are sent to the
+          normal device page.
+        */}
+        <Route
+          path="/enroll-device"
+          element={
+            <AuthenticatedStudentOnly>
+              <StudentEnrollDevicePage />
+            </AuthenticatedStudentOnly>
           }
         />
         <Route path="*" element={<NotFoundPage />} />

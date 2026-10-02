@@ -1,5 +1,6 @@
 import { pool } from "../db/pool";
 import { hashSessionToken } from "../lib/sessions";
+import { expireActiveEnrollmentGrants } from "./studentDeviceEnrollmentGrantStore";
 
 export interface AdminStudentDeviceRow {
   id: number;
@@ -239,6 +240,13 @@ export async function resetStudentDevice(
        WHERE student_id = $1 AND status = 'ACTIVE'`,
       [studentId]
     );
+
+    // An enrollment grant is a live authorization to enrol a device, so a reset must revoke it
+    // for the same reason it revokes the challenges above: anything issued before the reset
+    // predates the administrator's decision and must not survive it. Without this, a browser
+    // holding a pre-reset grant could still complete a ceremony, and the grant would have to be
+    // refused later by a device-state check rather than being retired at the source.
+    await expireActiveEnrollmentGrants(studentId, client);
 
     await client.query(
       `INSERT INTO audit_logs (user_id, action, entity_type, entity_id, description)

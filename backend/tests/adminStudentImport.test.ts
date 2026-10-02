@@ -9,6 +9,7 @@ import { authConfig } from "../src/config/auth";
 import { pool } from "../src/db/pool";
 import { IMPORT_LIMITS } from "../src/lib/excel";
 import { hashPassword } from "../src/lib/passwords";
+import { boundDeviceHeaders } from "./studentSessionTestHelpers";
 
 const TEST_PASSWORD = "admin-import-test-password";
 const ADMIN_USERNAME = "ADMIMP_ADMIN";
@@ -356,7 +357,7 @@ before(async () => {
   const studentLogin = await postJson("/api/auth/student/login", {
     matricNumber: STUDENT_MATRIC,
     password: TEST_PASSWORD,
-  });
+  }, await boundDeviceHeaders(STUDENT_MATRIC));
   assert.equal(studentLogin.status, 200);
   studentTokenValue = cookieFrom(studentLogin)!;
 

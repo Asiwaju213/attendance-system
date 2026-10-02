@@ -8,6 +8,7 @@ import { pool } from "../src/db/pool";
 import { hashPassword } from "../src/lib/passwords";
 import { hashSessionToken } from "../src/lib/sessions";
 import { createSession } from "../src/services/sessionStore";
+import { boundDeviceHeaders } from "./studentSessionTestHelpers";
 
 const TEST_PASSWORD = "lecturer-session-test-password";
 const ADMIN_USERNAME = "latt_admin";
@@ -488,7 +489,7 @@ test("students cannot create an attendance session", async () => {
   const login = await postJson("/api/auth/student/login", {
     matricNumber: STUDENT_MATRIC,
     password: TEST_PASSWORD,
-  });
+  }, await boundDeviceHeaders(STUDENT_MATRIC));
   const token = cookieFrom(login);
   assert.ok(token);
 

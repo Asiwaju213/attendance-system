@@ -62,6 +62,12 @@ export interface DeviceEnrollmentCompleteResult {
    * used for the usernameless login.
    */
   discoverable?: boolean;
+  /**
+   * True when this completion also established a normal student session, which happens on the
+   * first-device path: the enrollment grant is promoted into a session only once the ceremony
+   * commits. The client must re-sync its auth state when this is true.
+   */
+  sessionCreated?: boolean;
   device: {
     credentialId: string;
     status: "ACTIVE";

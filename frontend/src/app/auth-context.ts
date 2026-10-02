@@ -1,4 +1,5 @@
 import { createContext } from "react";
+import type { StudentLoginResult } from "../api/auth";
 import type { AuthStatus, User } from "../types/auth";
 import type { AuthenticationResponseJSON } from "../types/webauthn";
 
@@ -6,7 +7,24 @@ export interface AuthContextValue {
   user: User | null;
   status: AuthStatus;
   isAuthenticated: boolean;
-  loginStudent: (matricNumber: string, password: string) => Promise<User>;
+  /**
+   * Sign in with a matric number and password.
+   *
+   * Returns the backend's decision rather than assuming success: an authenticated session, a
+   * first-device enrollment grant, or a refusal because a device is already enrolled on another
+   * device. Only the first establishes a session here.
+   */
+  loginStudent: (
+    matricNumber: string,
+    password: string
+  ) => Promise<StudentLoginResult>;
+  /**
+   * Re-read the current user from the server.
+   *
+   * Needed after an enrollment that promoted an enrollment grant into a session: the session is
+   * created by the backend as a side effect of the ceremony, so the client must pick it up.
+   */
+  refreshCurrentUser: () => Promise<User | null>;
   /**
    * Sign in with a usernameless WebAuthn assertion plus the account password.
    *

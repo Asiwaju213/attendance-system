@@ -6,6 +6,7 @@ import { app } from "../src/app";
 import { authConfig } from "../src/config/auth";
 import { pool } from "../src/db/pool";
 import { hashPassword } from "../src/lib/passwords";
+import { boundDeviceHeaders } from "./studentSessionTestHelpers";
 
 /**
  * Role authorization for the attendance network / location configuration and
@@ -194,7 +195,7 @@ async function studentToken(): Promise<string> {
   const login = await postJson("/api/auth/student/login", {
     matricNumber: STUDENT_MATRIC,
     password: TEST_PASSWORD,
-  });
+  }, await boundDeviceHeaders(STUDENT_MATRIC));
   assert.equal(login.status, 200);
   const token = cookieFrom(login);
   assert.ok(token, "student login should issue a session cookie");

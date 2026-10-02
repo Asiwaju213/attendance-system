@@ -736,22 +736,67 @@ test("the verify endpoint requires a binding token, an assertion and a password"
 });
 
 // ---------------------------------------------------------------------------
-// Existing fallback path must be untouched
+// A matric number + password is no longer a login on its own
 // ---------------------------------------------------------------------------
 
-test("the existing matric number login still works as the fallback path", async () => {
+test("a matric number + password never mints a session, even for an enrolled student", async () => {
   resetStudentDeviceLoginLimiters();
   const res = await postJson("/api/auth/student/login", {
     matricNumber: enrolled.student.matric,
     password: TEST_PASSWORD,
   });
-  assert.equal(res.status, 200);
-  const { user } = (await res.json()) as { user: { matricNumber: string; id: number } };
-  assert.equal(user.matricNumber, enrolled.student.matric);
-  assert.equal(user.id, enrolled.student.userId);
+
+  // The credentials are correct, but this browser has presented no device, so it is refused:
+  // the enrolled device stays authoritative and an admin must reset it first.
+  assert.equal(res.status, 409);
+  const body = (await res.json()) as { error: string };
+  assert.equal(body.error, "DEVICE_ALREADY_ENROLLED");
+
+  const setCookie = res.headers.getSetCookie();
+  assert.equal(
+    setCookie.filter((c) => c.startsWith(`${authConfig.cookieName}=`)).length,
+    0,
+    "no session cookie may be issued"
+  );
+  // The response may clear a stale grant left over from an abandoned enrollment, but it must
+  // never hand this browser a usable one while an active device exists.
+  const grantCookie = setCookie.find((c) =>
+    c.startsWith(`${authConfig.enrollmentGrantCookieName}=`)
+  );
+  if (grantCookie) {
+    const value = grantCookie.slice(
+      grantCookie.indexOf("=") + 1,
+      grantCookie.indexOf(";")
+    );
+    assert.equal(
+      value,
+      "",
+      `a stale enrollment grant must be cleared, not re-issued (got "${value}")`
+    );
+    assert.match(
+      grantCookie,
+      /Max-Age=0|Expires=Thu, 01 Jan 1970/i,
+      "the cleared grant cookie must expire immediately"
+    );
+  }
+
+  // The enrolled device is untouched and can still authenticate.
+  const active = await pool.query(
+    `SELECT count(*)::int AS n FROM student_devices
+      WHERE student_id = $1 AND status = 'ACTIVE'`,
+    [enrolled.student.studentId]
+  );
+  assert.equal(active.rows[0].n, 1, "the enrolled device must remain the only active device");
+
+  const bound = await postJson(
+    "/api/auth/student/login",
+    { password: TEST_PASSWORD },
+    { cookie: `${authConfig.deviceBindingCookieName}=${enrolled.credentialId}` }
+  );
+  assert.equal(bound.status, 200, "the existing device must still be able to log in");
 });
 
-test("a wrong matric number is still rejected on the fallback path", async () => {
+test("a wrong matric number is still rejected", async () => {
   resetStudentDeviceLoginLimiters();
   const res = await postJson("/api/auth/student/login", {
     matricNumber: `DL/${RUN_ID}/9999`,
@@ -760,7 +805,7 @@ test("a wrong matric number is still rejected on the fallback path", async () =>
   assert.equal(res.status, 401);
 });
 
-test("the PENDING account is still rejected on the fallback path", async () => {
+test("the PENDING account is still rejected", async () => {
   resetStudentDeviceLoginLimiters();
   const res = await postJson("/api/auth/student/login", {
     matricNumber: pending.matric,

@@ -11,6 +11,7 @@ import { isoBase64URL } from "@simplewebauthn/server/helpers";
 import { hashPassword } from "../src/lib/passwords";
 import { generateSessionToken, hashSessionToken } from "../src/lib/sessions";
 import { createSession } from "../src/services/sessionStore";
+import { boundDeviceHeaders } from "./studentSessionTestHelpers";
 import {
   buildAuthenticationResponse,
   createTestAuthenticator,
@@ -30,6 +31,8 @@ let baseUrl: string;
 let passwordHash: string;
 
 let studentAUserId = 0;
+let studentCUserId = 0;
+let studentDUserId = 0;
 let studentBUserId = 0;
 let inactiveUserId = 0;
 let lecturerUserId = 0;
@@ -82,11 +85,28 @@ async function loginStudent(matricNumber: string): Promise<string> {
   const res = await postJson("/api/auth/student/login", {
     matricNumber,
     password: TEST_PASSWORD,
-  });
+  }, await boundDeviceHeaders(matricNumber));
   assert.equal(res.status, 200);
   const token = cookieFrom(res);
   assert.ok(token);
   return token!;
+}
+
+/**
+ * Mint a session directly, bypassing the login endpoint.
+ *
+ * A student with no ACTIVE device can no longer obtain a session from the login form at all --
+ * that is exactly the guarantee under test here. These two cases need to be "authenticated
+ * student whose device state is X", so the session is created straight in the session store.
+ */
+async function sessionForUser(userId: number): Promise<string> {
+  const token = generateSessionToken();
+  await createSession(
+    userId,
+    hashSessionToken(token),
+    new Date(Date.now() + 3600_000)
+  );
+  return token;
 }
 
 async function deviceChallenge(
@@ -129,8 +149,8 @@ async function seedDevice(
 ): Promise<void> {
   await pool.query(
     `INSERT INTO student_devices
-       (student_id, credential_id, credential_public_key, counter, status)
-     VALUES ($1, $2, $3, 1, $4)`,
+       (student_id, credential_id, credential_public_key, counter, status, discoverable)
+     VALUES ($1, $2, $3, 1, $4, TRUE)`,
     [
       studentProfileId,
       isoBase64URL.fromBuffer(authenticator.credentialId),
@@ -266,9 +286,11 @@ before(async () => {
   studentBProfileId = b.profileId!;
 
   const c = await insertUser("DVC StudC", "ACTIVE", STUDENT_C_MATRIC);
+  studentCUserId = c.userId;
   studentCProfileId = c.profileId!;
 
   const d = await insertUser("DVC StudD", "ACTIVE", STUDENT_D_MATRIC);
+  studentDUserId = d.userId;
   studentDProfileId = d.profileId!;
 
   const inactive = await insertUser("DVC Inactive", "INACTIVE");
@@ -466,7 +488,7 @@ test("DVC: an inactive student is rejected", async () => {
 // 4. Student with no enrolled device → 409 NO_ENROLLED_DEVICE
 // -----------------------------------------------------------------------
 test("DVC: a student with no enrolled device gets NO_ENROLLED_DEVICE", async () => {
-  const token = await loginStudent(STUDENT_C_MATRIC);
+  const token = await sessionForUser(studentCUserId);
   const res = await postJson(
     "/api/student/attendance/device-challenge",
     {},
@@ -480,7 +502,7 @@ test("DVC: a student with no enrolled device gets NO_ENROLLED_DEVICE", async () 
 // 5. Student with inactive device → 409 DEVICE_NOT_ACTIVE
 // -----------------------------------------------------------------------
 test("DVC: a student with an inactive device gets DEVICE_NOT_ACTIVE", async () => {
-  const token = await loginStudent(STUDENT_D_MATRIC);
+  const token = await sessionForUser(studentDUserId);
   const res = await postJson(
     "/api/student/attendance/device-challenge",
     {},

@@ -11,6 +11,7 @@ import { isoBase64URL } from "@simplewebauthn/server/helpers";
 import { hashPassword } from "../src/lib/passwords";
 import { generateSessionToken, hashSessionToken } from "../src/lib/sessions";
 import { createSession } from "../src/services/sessionStore";
+import { boundDeviceHeaders } from "./studentSessionTestHelpers";
 import {
   buildAuthenticationResponse,
   createTestAuthenticator,
@@ -112,7 +113,7 @@ async function loginStudent(matricNumber: string): Promise<string> {
   const res = await postJson("/api/auth/student/login", {
     matricNumber,
     password: TEST_PASSWORD,
-  });
+  }, await boundDeviceHeaders(matricNumber));
   assert.equal(res.status, 200);
   const token = cookieFrom(res);
   assert.ok(token);
@@ -171,8 +172,8 @@ async function seedDevice(
   authenticator: TestAuthenticator
 ): Promise<void> {
   await pool.query(
-    `INSERT INTO student_devices (student_id, credential_id, credential_public_key, counter, status)
-     VALUES ($1, $2, $3, 1, 'ACTIVE')`,
+    `INSERT INTO student_devices (student_id, credential_id, credential_public_key, counter, status, discoverable)
+     VALUES ($1, $2, $3, 1, 'ACTIVE', TRUE)`,
     [
       studentProfileId,
       isoBase64URL.fromBuffer(authenticator.credentialId),

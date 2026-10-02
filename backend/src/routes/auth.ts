@@ -1,5 +1,11 @@
 import { Request, Response, Router } from "express";
-import { authConfig, clearCookieOptions, clearRememberedAccountCookieOptions, clearDeviceBindingCookieOptions } from "../config/auth";
+import {
+  authConfig,
+  clearCookieOptions,
+  clearRememberedAccountCookieOptions,
+  clearDeviceBindingCookieOptions,
+  clearEnrollmentGrantCookieOptions,
+} from "../config/auth";
 import { hashPassword } from "../lib/passwords";
 import { hashSessionToken } from "../lib/sessions";
 import { getSessionToken, requireAuth, getCookieValue } from "../middleware/authenticate";
@@ -21,8 +27,11 @@ import {
 import { findSafeUserById } from "../services/userStore";
 import {
   findStudentLoginCandidateByCredentialId,
+  findStudentByUserId,
+  hasActiveDevice,
   isDiscoverableCredential,
 } from "../services/studentDeviceStore";
+import { issueEnrollmentGrant } from "../services/studentDeviceEnrollmentGrantStore";
 import {
   findSessionByTokenHash,
   isSessionActive,
@@ -95,30 +104,88 @@ function buildLoginHandler(role: Role, identifierField: string) {
     }
 
     res.cookie(authConfig.cookieName, result.token, authConfig.cookie);
-    
-    // For student login, set a long-lived remembered account cookie so returning
-    // students can skip the matric number entry on subsequent visits. The cookie
-    // is HTTP-only and secure; the matric number is never exposed to JavaScript.
-    if (role === "STUDENT") {
-      res.cookie(
-        authConfig.rememberedAccountCookieName,
-        credentials.identifier,
-        authConfig.rememberedAccountCookie
-      );
-    }
-    
     res.status(200).json({ user: result.safeUser });
   };
 }
 
+// ------------------------------------------------------------------
+// Decide what a matric-number + password login on an UNBOUND device may
+// have. This path never proves possession of a registered authenticator, so it must never mint a
+// normal student session.
+//
+//   no ACTIVE device  -> short-lived enrollment grant; the session is created only after the
+//                        WebAuthn ceremony commits.
+//   ACTIVE device     -> nothing. The existing device stays authoritative and replacement
+//                        requires an admin reset.
+// ------------------------------------------------------------------
+async function respondWithEnrollmentDecision(
+  res: Response,
+  userId: number
+): Promise<void> {
+  const student = await findStudentByUserId(userId);
+  if (!student) {
+    // A STUDENT-role account with no student profile cannot enrol a device.
+    res.status(401).json({ error: "INVALID_CREDENTIALS" });
+    return;
+  }
+
+  if (await hasActiveDevice(student.studentId)) {
+    // Drop any stale grant: a browser that previously began an enrollment must not be able to
+    // spend that grant now that an active device exists.
+    res.clearCookie(
+      authConfig.enrollmentGrantCookieName,
+      clearEnrollmentGrantCookieOptions
+    );
+    // No session, no grant, and nothing about the enrolled device beyond the fact that
+    // enrollment is unavailable. That fact is not a secret: the student needs it to know to ask
+    // an administrator for a reset.
+    res.status(409).json({
+      error: "DEVICE_ALREADY_ENROLLED",
+      message:
+        "A device is already enrolled for this account. An administrator must reset it before a new device can be enrolled.",
+    });
+    return;
+  }
+
+  const grant = await issueEnrollmentGrant(student.studentId);
+  if (!grant.ok) {
+    res.status(500).json({
+      error: "INTERNAL_ERROR",
+      message:
+        "An unexpected error occurred while starting device enrollment.",
+    });
+    return;
+  }
+
+  res.cookie(
+    authConfig.enrollmentGrantCookieName,
+    grant.grantToken,
+    authConfig.enrollmentGrantCookie
+  );
+  // `enrollmentRequired: true` is the whole response. No user object, no student id, no device
+  // id: the caller only needs to know it must now run the enrollment ceremony.
+  res.status(200).json({ enrollmentRequired: true });
+}
+
 // Student login with device-binding support.
-// If a valid device-binding cookie is present, the credential ID from the cookie
-// identifies the student, and only the password is required from the request body.
-// If no valid device-binding cookie, falls back to matric+password login.
+//
+// Two distinct proofs are handled here, and the difference is the security boundary:
+//
+//   * A valid device-binding cookie identifies the student from a credential the browser already
+//     holds. Together with the password that is the existing-device proof, so it mints a normal
+//     session exactly as before.
+//
+//   * No device-binding cookie means only a matric number and a password. That proves nothing
+//     about a device, so it never mints a session. It is either the start of a first-device
+//     enrollment (see `respondWithEnrollmentDecision`) or a rejected attempt to add a second
+//     device while one is already active.
 router.post("/student/login", async (req: Request, res: Response): Promise<void> => {
   const credentialId = getCookieValue(req, authConfig.deviceBindingCookieName);
   let identifier: string;
   let password: string;
+  // The trimmed, verified credential id for a device-bound login. Stays null on the matric +
+  // password path, where no device has been proven.
+  let boundCredentialId: string | null = null;
 
   if (credentialId && typeof credentialId === "string" && credentialId.trim() !== "") {
     // Device-binding cookie present: use it to identify the student.
@@ -132,6 +199,7 @@ router.post("/student/login", async (req: Request, res: Response): Promise<void>
       return;
     }
     password = parsedPassword;
+    boundCredentialId = credentialId.trim();
 
     const candidate = await findStudentLoginCandidateByCredentialId(credentialId.trim());
     if (
@@ -151,7 +219,7 @@ router.post("/student/login", async (req: Request, res: Response): Promise<void>
 
     identifier = candidate.identifier;
   } else {
-    // No device-binding cookie: fall back to matric+password login.
+    // No device-binding cookie: matric + password only.
     const credentials = parseLoginCredentials(req.body, "matricNumber");
     if (!credentials) {
       res.status(400).json({
@@ -178,6 +246,13 @@ router.post("/student/login", async (req: Request, res: Response): Promise<void>
     return;
   }
 
+  // Password alone is not a device proof: hand this to the enrollment decision instead of
+  // creating a session.
+  if (boundCredentialId === null) {
+    await respondWithEnrollmentDecision(res, candidate.id);
+    return;
+  }
+
   const token = generateSessionToken();
   await createSession(
     candidate.id,
@@ -187,14 +262,19 @@ router.post("/student/login", async (req: Request, res: Response): Promise<void>
 
   res.cookie(authConfig.cookieName, token, authConfig.cookie);
 
-  // If this was a device-bound login, refresh the device-binding cookie
-  if (credentialId) {
-    res.cookie(
-      authConfig.deviceBindingCookieName,
-      credentialId.trim(),
-      authConfig.deviceBindingCookie
-    );
-  }
+  // A session now exists, so any outstanding enrollment grant is redundant. Clear it so the
+  // browser is not left holding a credential that could start another ceremony.
+  res.clearCookie(
+    authConfig.enrollmentGrantCookieName,
+    clearEnrollmentGrantCookieOptions
+  );
+
+  // Refresh the device-binding cookie for the verified device.
+  res.cookie(
+    authConfig.deviceBindingCookieName,
+    boundCredentialId,
+    authConfig.deviceBindingCookie
+  );
 
   const safeUser = toSafeUser({ ...candidate, role: "STUDENT" });
   res.status(200).json({ user: safeUser });
@@ -357,6 +437,12 @@ router.post("/logout", async (req: Request, res: Response) => {
   // accounts, the student uses "Use a different student" which explicitly clears
   // the remembered account cookie via /auth/student/remembered/clear.
   res.clearCookie(authConfig.cookieName, clearCookieOptions);
+  // An outstanding enrollment grant is a live credential for the ceremony; signing out
+  // must not leave one behind in the browser.
+  res.clearCookie(
+    authConfig.enrollmentGrantCookieName,
+    clearEnrollmentGrantCookieOptions
+  );
   res.status(200).json({ message: "Logged out." });
 });
 

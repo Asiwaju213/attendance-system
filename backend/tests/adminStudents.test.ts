@@ -7,6 +7,11 @@ import { authConfig } from "../src/config/auth";
 import { pool } from "../src/db/pool";
 import { hashPassword } from "../src/lib/passwords";
 import { hashSessionToken } from "../src/lib/sessions";
+import {
+  boundDeviceHeaders,
+  deviceBindingHeader,
+  ensureActiveDiscoverableDevice,
+} from "./studentSessionTestHelpers";
 
 /**
  * Admin Student Management (list / detail / status / reset-registration)
@@ -124,8 +129,8 @@ async function seedDevice(
 ): Promise<number> {
   const result = await pool.query(
     `INSERT INTO student_devices
-       (student_id, credential_id, credential_public_key, counter, status)
-     VALUES ($1, $2, $3, 1, $4)
+       (student_id, credential_id, credential_public_key, counter, status, discoverable)
+     VALUES ($1, $2, $3, 1, $4, TRUE)
      RETURNING id`,
     [profileId, credentialId, Buffer.from([0xde, 0xad, 0xbe, 0xef]), status]
   );
@@ -175,6 +180,10 @@ async function cleanupFixtures(): Promise<void> {
      WHERE user_id IN (
        SELECT id FROM users WHERE name LIKE 'ASM %' OR username LIKE 'ASM_%'
      )`
+  );
+  await pool.query(
+    `DELETE FROM student_device_enrollment_grants
+     WHERE student_id IN (SELECT id FROM students WHERE matric_number LIKE 'ASM/%')`
   );
   await pool.query(
     `DELETE FROM student_devices
@@ -822,10 +831,14 @@ test("ASM status: INACTIVE -> ACTIVE restores authentication", async () => {
   const body = (await res.json()) as { data: { status: string } };
   assert.equal(body.data.status, "ACTIVE");
 
-  const login = await postJson("/api/auth/student/login", {
-    matricNumber: reactivateTarget.matric,
-    password: TEST_PASSWORD,
-  });
+  const login = await postJson(
+    "/api/auth/student/login",
+    {
+      matricNumber: reactivateTarget.matric,
+      password: TEST_PASSWORD,
+    },
+    await boundDeviceHeaders(reactivateTarget.matric)
+  );
   assert.equal(login.status, 200);
 });
 
@@ -1098,15 +1111,37 @@ test("ASM reset: client-supplied identity fields cannot override the route ident
 // Lifecycle: reset -> re-register -> login
 // -----------------------------------------------------------------------
 
-test("ASM lifecycle: reset -> PENDING -> reject login -> re-register -> ACTIVE", async () => {
-  const beforeLogin = await postJson("/api/auth/student/login", {
-    matricNumber: lifecycleTarget.matric,
-    password: TEST_PASSWORD,
-  });
+test("ASM lifecycle: reset -> PENDING -> reject login -> re-register -> ACTIVE on the same device", async () => {
+  const staleCredentialId = await ensureActiveDiscoverableDevice(lifecycleTarget.matric);
+  const beforeLogin = await postJson(
+    "/api/auth/student/login",
+    {
+      matricNumber: lifecycleTarget.matric,
+      password: TEST_PASSWORD,
+    },
+    deviceBindingHeader(staleCredentialId)
+  );
   assert.equal(beforeLogin.status, 200, "the active student can log in before reset");
 
   const reset = await resetViaApi(lifecycleTarget.profileId);
   assert.equal(reset.status, 200);
+
+  // The reset returns the account to PENDING, so the enrolled device can no longer be used to
+  // sign in. The revoked credential id is reused deliberately: asking the shared helper for an
+  // ACTIVE device here would silently create a fresh one and hide the regression.
+  const staleDeviceLogin = await postJson(
+    "/api/auth/student/login",
+    {
+      matricNumber: lifecycleTarget.matric,
+      password: TEST_PASSWORD,
+    },
+    deviceBindingHeader(staleCredentialId)
+  );
+  assert.notEqual(
+    staleDeviceLogin.status,
+    200,
+    "the revoked device must not be able to log in after a reset"
+  );
 
   const rejectedLogin = await postJson("/api/auth/student/login", {
     matricNumber: lifecycleTarget.matric,
@@ -1137,11 +1172,32 @@ test("ASM lifecycle: reset -> PENDING -> reject login -> re-register -> ACTIVE",
     "the new password hash must be set"
   );
 
-  const newLogin = await postJson("/api/auth/student/login", {
+  const newLogin = await postJson(
+    "/api/auth/student/login",
+    {
+      matricNumber: lifecycleTarget.matric,
+      password: NEW_PASSWORD,
+    },
+    deviceBindingHeader(staleCredentialId)
+  );
+  assert.equal(newLogin.status, 200, "the new password must work on the enrolled device");
+  const newLoginBody = (await newLogin.json()) as { user: Record<string, unknown> };
+  assert.equal(newLoginBody.user.matricNumber, lifecycleTarget.matric);
+
+  // A registration reset returns the account to the unclaimed state; it is not a device reset.
+  // The enrolled device therefore stays authoritative, and re-registering must not become a way
+  // to mint a session from a different device.
+  const unboundAfterReregister = await postJson("/api/auth/student/login", {
     matricNumber: lifecycleTarget.matric,
     password: NEW_PASSWORD,
   });
-  assert.equal(newLogin.status, 200, "the new password must work");
+  assert.equal(
+    unboundAfterReregister.status,
+    409,
+    "re-registering must not bypass the enrolled device"
+  );
+  const unboundBody = (await unboundAfterReregister.json()) as { error: string };
+  assert.equal(unboundBody.error, "DEVICE_ALREADY_ENROLLED");
 
   const oldLogin = await postJson("/api/auth/student/login", {
     matricNumber: lifecycleTarget.matric,

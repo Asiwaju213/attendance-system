@@ -8,6 +8,7 @@ import { pool } from "../src/db/pool";
 import { hashPassword } from "../src/lib/passwords";
 import { generateSessionToken, hashSessionToken } from "../src/lib/sessions";
 import { createSession } from "../src/services/sessionStore";
+import { boundDeviceHeaders } from "./studentSessionTestHelpers";
 
 const TEST_PASSWORD = "shist-test-password";
 const ADMIN_USERNAME = "shist_admin";
@@ -126,7 +127,7 @@ async function loginStudent(matricNumber: string): Promise<string> {
   const res = await postJson("/api/auth/student/login", {
     matricNumber,
     password: TEST_PASSWORD,
-  });
+  }, await boundDeviceHeaders(matricNumber));
   assert.equal(res.status, 200);
   const token = cookieFrom(res);
   assert.ok(token);

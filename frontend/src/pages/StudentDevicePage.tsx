@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { homePathForRole } from "../app/navigation";
 import { useAuth } from "../app/useAuth";
 import { FormError } from "../components/FormError";
@@ -88,12 +88,34 @@ function formatEnrolledAt(value: string): string {
 }
 
 export function StudentDevicePage() {
-  const { user, logout } = useAuth();
+  return <StudentDevicePageBody enrollmentOnly={false} />;
+}
+
+/**
+ * The first-device enrollment page.
+ *
+ * Rendered outside `ProtectedRoute`, because at this point the student is deliberately *not*
+ * signed in: the backend issued a short-lived, single-use enrollment grant instead of a session,
+ * and only promotes that grant into a real session once the ceremony commits. Requiring a session
+ * here would bounce the student straight back to the login page and make first-device enrollment
+ * impossible.
+ *
+ * The grant is an HttpOnly cookie, so this page cannot read it and does not try to. It simply
+ * calls the enrollment endpoints; the backend decides whether the request is authorized.
+ */
+export function StudentEnrollDevicePage() {
+  return <StudentDevicePageBody enrollmentOnly />;
+}
+
+function StudentDevicePageBody({ enrollmentOnly }: { enrollmentOnly: boolean }) {
+  const { user, logout, refreshCurrentUser } = useAuth();
+  const navigate = useNavigate();
 
   const [status, setStatus] = useState<StudentDeviceStatus | null>(null);
   const [isLoadingStatus, setIsLoadingStatus] = useState(true);
   const [isEnrolling, setIsEnrolling] = useState(false);
   const [enrollmentError, setEnrollmentError] = useState<string | null>(null);
+  const [accessError, setAccessError] = useState<string | null>(null);
   const [notice, setNotice] = useState<CeremonyNotice>(null);
   const [deviceLabel, setDeviceLabel] = useState("");
   const [isLoggingOut, setIsLoggingOut] = useState(false);
@@ -105,13 +127,28 @@ export function StudentDevicePage() {
   const refreshStatus = useCallback(async () => {
     try {
       setStatus(await getStudentDeviceStatus());
-    } catch {
+      setAccessError(null);
+    } catch (error) {
+      if (
+        enrollmentOnly &&
+        error instanceof ApiError &&
+        (error.status === 401 || error.status === 403)
+      ) {
+        // The grant is gone: it expired, it was already spent, or an administrator reset the
+        // account. None of those are recoverable from this page, and the failure modes are
+        // deliberately indistinguishable, so the student is simply asked to start again.
+        setStatus(null);
+        setAccessError(
+          "Your device enrollment session is no longer valid. Please sign in again to start a new enrollment."
+        );
+        return;
+      }
       // Leave `status` as-is: the error surfaces through the normal auth/transport handling,
       // and keeping the last known state is better than claiming the student has no device.
     } finally {
       setIsLoadingStatus(false);
     }
-  }, []);
+  }, [enrollmentOnly]);
 
   useEffect(() => {
     void refreshStatus();
@@ -144,6 +181,19 @@ export function StudentDevicePage() {
 
       const credential = await getDeviceRegistration(optionsResponse.data);
       const result = await completeDeviceEnrollment(credential, deviceLabel.trim() || null);
+
+      // A first-device enrollment arrives holding an enrollment grant rather than a session, so
+      // the backend mints the `oou_session` as part of this response. Pick it up before doing
+      // anything else: navigating to the dashboard without it would bounce straight back to the
+      // login page.
+      if (result.sessionCreated === true) {
+        const promotedUser = await refreshCurrentUser();
+        navigate(
+          promotedUser === null ? "/login" : homePathForRole(promotedUser.role),
+          { replace: true }
+        );
+        return;
+      }
 
       // Re-read rather than trusting the completion payload: the device rows are the only source
       // of truth, and this also picks up any concurrent admin reset.
@@ -178,7 +228,10 @@ export function StudentDevicePage() {
     window.location.href = "/login";
   }
 
-  if (user === null) {
+  // Without a session and outside the enrollment-only route there is nothing to show: the
+  // `ProtectedRoute` guard normally prevents this. In enrollment-only mode `user` is null *by
+  // design*, because the student is holding an enrollment grant rather than a session.
+  if (user === null && !enrollmentOnly) {
     return <LoadingPage />;
   }
 
@@ -202,23 +255,38 @@ export function StudentDevicePage() {
           <p className="device-enrollment-header__eyebrow">Student security</p>
           <h1>Device Enrollment</h1>
           <p className="app-header__sub">
-            Register a WebAuthn authenticator (passkey) to enable secure attendance
-            marking.
+            {enrollmentOnly
+              ? "Register this device to finish signing in. Your account password was accepted, but a passkey must be registered on this phone before you can use the app."
+              : "Register a WebAuthn authenticator (passkey) to enable secure attendance marking."}
           </p>
         </div>
         <nav className="app-header__nav" aria-label="Student navigation">
-          <Link to={homePathForRole("STUDENT")}>Home</Link>
-          <button
-            type="button"
-            className="secondary-button"
-            onClick={handleLogout}
-            disabled={isLoggingOut}
-            aria-busy={isLoggingOut}
-          >
-            {isLoggingOut ? "Logging out…" : "Log out"}
-          </button>
+          {enrollmentOnly ? (
+            // No session yet, so there is no Home to go to and nothing to log out of. The grant is
+            // an HttpOnly cookie; leaving this page simply abandons it.
+            <Link to="/login">Back to sign in</Link>
+          ) : (
+            <>
+              <Link to={homePathForRole("STUDENT")}>Home</Link>
+              <button
+                type="button"
+                className="secondary-button"
+                onClick={handleLogout}
+                disabled={isLoggingOut}
+                aria-busy={isLoggingOut}
+              >
+                {isLoggingOut ? "Logging out…" : "Log out"}
+              </button>
+            </>
+          )}
         </nav>
       </header>
+
+      {accessError !== null ? (
+        <div className="resource-error device-enrollment-error" role="alert">
+          <FormError message={accessError} />
+        </div>
+      ) : null}
 
       <section className="device-status-section" aria-labelledby="device-status-heading">
         <h2 id="device-status-heading" className="device-status-section__title">
@@ -232,7 +300,7 @@ export function StudentDevicePage() {
           </div>
         ) : null}
 
-        {!isLoadingStatus && state === null ? (
+        {!isLoadingStatus && state === null && accessError === null ? (
           <div className="device-status-card device-status-card--unenrolled">
             <div className="device-status-card__status">
               <span className="device-status-badge device-status-badge--none">

@@ -189,6 +189,18 @@ after(async () => {
     `DELETE FROM student_registration_challenges WHERE user_id = ANY($1::BIGINT[])`,
     [userIds]
   );
+  // Claiming an account issues an enrollment grant; the grant FK onto students is RESTRICT, so
+  // these rows must go before the students do.
+  await pool.query(
+    `DELETE FROM student_device_enrollment_grants
+      WHERE student_id IN (SELECT id FROM students WHERE user_id = ANY($1::BIGINT[]))`,
+    [userIds]
+  );
+  await pool.query(
+    `DELETE FROM student_devices
+      WHERE student_id IN (SELECT id FROM students WHERE user_id = ANY($1::BIGINT[]))`,
+    [userIds]
+  );
   await pool.query(`DELETE FROM students WHERE user_id = ANY($1::BIGINT[])`, [
     userIds,
   ]);
@@ -517,11 +529,18 @@ test("REGST completion: the student immediately authenticates and /me returns ST
   assert.equal(meBody.user.role, "STUDENT");
   assert.equal(meBody.user.matricNumber, "REGST/0013");
 
+  // Claiming the account does not enroll a device. A fresh student on an unbound browser is
+  // therefore sent to device enrollment, not handed a session from the password alone.
   const login = await postJson("/api/auth/student/login", {
     matricNumber: "REGST/0013",
     password: REGISTRATION_PASSWORD,
   });
   assert.equal(login.status, 200);
+  assert.deepEqual(await login.json(), { enrollmentRequired: true });
+  assert.ok(
+    !login.headers.getSetCookie().some((c) => c.startsWith(`${authConfig.cookieName}=`)),
+    "a claimed-but-unenrolled account must not receive a session cookie"
+  );
 
   const sessions = await pool.query(
     `SELECT user_id, session_token_hash, expires_at, revoked_at
@@ -530,7 +549,11 @@ test("REGST completion: the student immediately authenticates and /me returns ST
      ORDER BY id`,
     [pendingIds["REGST/0013"]]
   );
-  assert.equal(sessions.rowCount, 2, "one session from completion, one from login");
+  assert.equal(
+    sessions.rowCount,
+    1,
+    "only the completion session exists; the enrollment-only login must not add one"
+  );
   const completionSession = sessions.rows[0];
   assert.equal(completionSession.session_token_hash, hashSessionToken(completionCookie));
   assert.equal(completionSession.session_token_hash.length, 64);

@@ -8,6 +8,7 @@ import { pool } from "../src/db/pool";
 import { hashPassword } from "../src/lib/passwords";
 import { hashSessionToken } from "../src/lib/sessions";
 import { createSession } from "../src/services/sessionStore";
+import { boundDeviceHeaders } from "./studentSessionTestHelpers";
 
 const TEST_PASSWORD = "lecturer-catalog-test-password";
 const ADMIN_USERNAME = "lcat_admin";
@@ -426,7 +427,7 @@ test("students cannot read the lecturer catalog", async () => {
   const login = await postJson("/api/auth/student/login", {
     matricNumber: STUDENT_MATRIC,
     password: TEST_PASSWORD,
-  });
+  }, await boundDeviceHeaders(STUDENT_MATRIC));
   const token = cookieFrom(login);
   assert.ok(token);
 
