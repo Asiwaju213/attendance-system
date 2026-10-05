@@ -14,6 +14,31 @@ import {
 import type { SyncChangesBatch } from "../types/sync";
 
 /**
+ * Guards against accidentally running the edge sync worker on a cloud/provider deployment.
+ *
+ * The cloud is the sync PROVIDER (serves the feed) and must never also run the
+ * CONSUMER worker. A deployment is a provider if SYNC_PROVIDER_SECRET_HASH is set.
+ * If a provider deployment also has SYNC_ENABLED=true with valid consumer config,
+ * that is a misconfiguration and we fail fast rather than silently starting the
+ * wrong worker.
+ */
+function assertNotProviderRunningConsumer(): void {
+  const isProvider = syncConfig.provider.secretHash !== null;
+  const isConsumerEnabled = syncConfig.consumer.enabled;
+
+  if (isProvider && isConsumerEnabled) {
+    const msg = [
+      "FATAL: This deployment is configured as a sync PROVIDER (SYNC_PROVIDER_SECRET_HASH is set)",
+      "but also has consumer sync enabled (SYNC_ENABLED=true with SYNC_EDGE_ID, SYNC_EDGE_SECRET, SYNC_CLOUD_BASE_URL).",
+      "A cloud/provider deployment must never run the edge sync worker.",
+      "Either remove SYNC_PROVIDER_SECRET_HASH to run as an edge,",
+      "or unset SYNC_ENABLED (and SYNC_EDGE_ID / SYNC_EDGE_SECRET / SYNC_CLOUD_BASE_URL) to run as a provider.",
+    ].join(" ");
+    throw new Error(msg);
+  }
+}
+
+/**
  * The local K12 sync worker.
  *
  * Runs as a module alongside the local backend. It is NOT a second HTTP server
@@ -201,6 +226,9 @@ export function startSyncWorker(): void {
   if (!config.enabled) {
     return;
   }
+
+  // Hard guard: a cloud/provider deployment must never run the edge worker.
+  assertNotProviderRunningConsumer();
 
   // Belt and braces alongside the NODE_ENV=test check in index.ts: a test run must
   // never reach out to a real cloud, no matter how the environment is configured.

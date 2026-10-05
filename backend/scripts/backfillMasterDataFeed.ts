@@ -23,6 +23,12 @@
 // upsert writes the same values again), so the only cost of a repeat run is feed
 // length. Run it once after adding master data out of band (an import, a data
 // migration, a restore from backup), not on a schedule.
+//
+// Production safety:
+// ------------------
+// When NODE_ENV=production, this script requires an explicit --confirm-production
+// flag to proceed. Without it, the script aborts before any database mutation.
+// This prevents accidental execution against a production database.
 import type { PoolClient } from "pg";
 import { join } from "node:path";
 import dotenv from "dotenv";
@@ -35,9 +41,9 @@ import {
   appendCourseOfferingEvent,
   appendDepartmentEvent,
   appendFacultyEvent,
-  appendLecturerEvent,
   appendLevelEvent,
   appendLocationEvent,
+  appendLecturerEvent,
   appendSemesterEvent,
 } from "../src/services/syncMasterDataEmitters";
 
@@ -46,6 +52,43 @@ dotenv.config({
   override: false,
   quiet: true,
 });
+
+/**
+ * Determines whether we are running in a production context and whether the
+ * required confirmation flag is present.
+ *
+ * The backfill must not silently mutate a production database. In production
+ * (NODE_ENV=production), the caller MUST pass --confirm-production on the
+ * command line. Without it, the script aborts with a clear message before any BEGIN.
+ */
+function assertProductionConfirmed(): void {
+  const isProduction = process.env.NODE_ENV === "production";
+  const hasConfirmFlag = process.argv.includes("--confirm-production");
+
+  if (isProduction && !hasConfirmFlag) {
+    console.error(
+      "ERROR: Refusing to run backfill in production without explicit confirmation.\n" +
+        "This script will write events to the sync change feed of the database\n" +
+        "configured by your environment variables.\n\n" +
+        "To proceed, re-run with:\n" +
+        "  npx tsx scripts/backfillMasterDataFeed.ts --confirm-production\n\n" +
+        "For non-production environments, the flag is not required."
+    );
+    process.exit(1);
+  }
+
+  // Additional safety: refuse to run against a test database when not in test mode.
+  // The test database is isolated by NODE_ENV=test and discrete DATABASE_* vars.
+  if (process.env.NODE_ENV === "test") {
+    console.error(
+      "ERROR: This script should not be run with NODE_ENV=test.\n" +
+        "Test runs use an isolated test database; backfill there serves no purpose."
+    );
+    process.exit(1);
+  }
+}
+
+assertProductionConfirmed();
 
 /**
  * Dependency order, and the order cursors are assigned in.
