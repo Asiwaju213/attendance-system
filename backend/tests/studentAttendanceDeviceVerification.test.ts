@@ -49,8 +49,6 @@ let authenticatorBad: TestAuthenticator;
 
 let course1Id = 0;
 let offering1Id = 0;
-let network1Id = 0;
-let location1Id = 0;
 let markSessionIds: number[] = [];
 
 const SESSION_IDS = () => markSessionIds;
@@ -236,25 +234,7 @@ before(async () => {
     ).rows[0].id
   );
 
-  network1Id = Number(
-    (
-      await pool.query(
-        `INSERT INTO attendance_networks (network_code, name)
-         VALUES ($1, 'DVC Net') RETURNING id`,
-        [`DVC-NET-${RUN_ID}`]
-      )
-    ).rows[0].id
-  );
-
-  location1Id = Number(
-    (
-      await pool.query(`INSERT INTO locations (name) VALUES ($1) RETURNING id`, [
-        `DVC-LOC-${RUN_ID}`,
-      ])
-    ).rows[0].id
-  );
-
-  async function insertUser(
+    async function insertUser(
     name: string,
     status: string,
     matric?: string
@@ -341,13 +321,12 @@ before(async () => {
         (
           await pool.query(
             `INSERT INTO attendance_sessions
-               (course_offering_id, started_by_lecturer_id, attendance_network_id,
-                location_id, start_time, end_time, late_threshold, status)
-             VALUES ($1, $2, $3, $4,
+              (course_offering_id, started_by_lecturer_id, start_time, end_time, late_threshold, status)
+             VALUES ($1, $2,
                      now() - interval '1 minute', now() + interval '60 minutes',
                      interval '10 minutes', 'ACTIVE')
              RETURNING id`,
-            [offering1Id, Number(sessionLectProfile.rows[0].id), network1Id, location1Id]
+            [offering1Id, Number(sessionLectProfile.rows[0].id)]
           )
         ).rows[0].id
       )
@@ -372,6 +351,27 @@ after(async () => {
   // Delete every DVC test fixture across runs, in FK-safe dependency order.
   // Cleanups are scoped by the DVC namespace (rather than this run's ids) so
   // a previously interrupted run can never block a later run's teardown.
+  // Migration 012 queues every marked record in sync_outbound_attendance_marks,
+  // which holds a RESTRICT foreign key to attendance_records. Those rows go first,
+  // or deleting a record this suite marked fails at teardown.
+  await pool.query(
+    `DELETE FROM sync_outbound_attendance_marks
+     WHERE attendance_record_id IN (
+       SELECT ar.id
+       FROM attendance_records ar
+       WHERE ar.session_id = ANY($1::BIGINT[])
+          OR ar.student_id IN (
+            SELECT id FROM students WHERE matric_number LIKE 'DVC/STU/%'
+          )
+          OR ar.session_id IN (
+            SELECT s.id
+            FROM attendance_sessions s
+            JOIN lecturers lec ON lec.id = s.started_by_lecturer_id
+            WHERE lec.staff_id LIKE 'DVC/LEC/%'
+          )
+     )`,
+    [SESSION_IDS()]
+  );
   await pool.query(
     `DELETE FROM attendance_records WHERE session_id = ANY($1::BIGINT[])`,
     [SESSION_IDS()]
@@ -414,10 +414,6 @@ after(async () => {
   );
   await pool.query(`DELETE FROM courses WHERE course_code LIKE 'DVC-C%'`);
   await pool.query(`DELETE FROM academic_sessions WHERE name LIKE 'DVC-ACAD-%'`);
-  await pool.query(
-    `DELETE FROM attendance_networks WHERE network_code LIKE 'DVC-NET-%'`
-  );
-  await pool.query(`DELETE FROM locations WHERE name LIKE 'DVC-LOC-%'`);
   await pool.query(
     `DELETE FROM sessions WHERE user_id IN (
        SELECT id FROM users WHERE name LIKE 'DVC %' OR name LIKE 'DVC-Lec%'

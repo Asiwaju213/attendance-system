@@ -113,6 +113,44 @@ instead to expose the API on that interface only. `HOST` and `PORT` are optional
 an unset or blank value means the default, and an invalid value fails at startup
 with a clear message rather than being silently ignored.
 
+#### Students: `STUDENT_ACCESS_MODE`
+
+This PC is the deployment that serves students. It says so explicitly:
+
+```ini
+HOST=0.0.0.0
+PORT=5000
+STUDENT_ACCESS_MODE=edge
+```
+
+| Value | Effect |
+|---|---|
+| `edge` | Students sign in and use attendance. This is the K12 PC's setting. |
+| `cloud` | Student sign-in and every `/api/student/*` API answer `403 STUDENT_ACCESS_DISABLED`. This is the public Render deployment's setting. |
+| unset | Treated as `cloud`. |
+
+Two things this is not:
+
+- **Not an IP allowlist.** No part of the student policy reads the client's
+  address, a forwarded header, or `HOST`. Behind the Vercel rewrite those are
+  proxy addresses of uncertain meaning, and a client-influenceable header must
+  never decide who signs in.
+- **Not `SYNC_ENABLED`.** That variable means "run the background sync worker"
+  and says nothing about who may sign in.
+
+Unset defaults to `cloud` on purpose: a deployment nobody has configured must
+never be the reason students are reachable from the open Internet. An
+unrecognized value fails at startup rather than defaulting.
+
+Confirm what a running process resolved with the startup log line, or
+`GET /api/health`, which reports `studentAccessMode`.
+
+This switch decides **who the software serves, not who can reach the PC.** If the
+edge is ever exposed beyond the campus network — port forwarding, Internet
+Connection Sharing, an open firewall rule — students will be served to whoever
+reaches it. Keeping the edge private is the router's and the firewall's job; see
+[Manual steps (network side)](#manual-steps-network-side).
+
 ### Frontend — `frontend/.env`
 
 ```bash

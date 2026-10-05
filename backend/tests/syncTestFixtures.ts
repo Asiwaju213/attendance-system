@@ -49,14 +49,12 @@ async function insert(
  *
  * Deliberately does not reuse any other test file's seeding: this suite must be
  * runnable on its own, and the attendance-session lifecycle needs exactly one
- * lecturer, one offering, one network and one location.
+ * lecturer and one offering.
  */
 export async function seedLecturerSessionFixture(): Promise<{
   userId: number;
   sessionToken: string;
   courseOfferingId: number;
-  attendanceNetworkId: number;
-  locationId: number;
 }> {
   const { pool } = await import("../src/db/pool");
   const { hashPassword } = await import("../src/lib/passwords");
@@ -102,17 +100,6 @@ export async function seedLecturerSessionFixture(): Promise<{
     [courseId, academicSessionId, semesterId]
   );
 
-  const attendanceNetworkId = await insert(
-    `INSERT INTO attendance_networks (network_code, name, status)
-     VALUES ($1, $2, 'ACTIVE') RETURNING id`,
-    [unique("NET"), `${SYNC_TEST_PREFIX} Network`]
-  );
-
-  const locationId = await insert(
-    `INSERT INTO locations (name, status) VALUES ($1, 'ACTIVE') RETURNING id`,
-    [`${SYNC_TEST_PREFIX} Location ${counter}`]
-  );
-
   const userId = await insert(
     `INSERT INTO users (name, password_hash, role, status)
      VALUES ($1, $2, 'LECTURER', 'ACTIVE') RETURNING id`,
@@ -141,8 +128,6 @@ export async function seedLecturerSessionFixture(): Promise<{
     userId,
     sessionToken,
     courseOfferingId,
-    attendanceNetworkId,
-    locationId,
   };
 }
 
@@ -168,10 +153,6 @@ export async function seedMasterDataGraph(): Promise<{
   semesterSyncId: string;
   courseOfferingId: number;
   courseOfferingSyncId: string;
-  locationId: number;
-  locationSyncId: string;
-  networkId: number;
-  networkSyncId: string;
   lecturerId: number;
   lecturerSyncId: string;
 }> {
@@ -184,10 +165,6 @@ export async function seedMasterDataGraph(): Promise<{
   );
   
   const { createOffering } = await import("../src/services/courseOfferingStore");
-  const { createLocation } = await import("../src/services/locationStore");
-  const { createAttendanceNetwork } = await import(
-    "../src/services/attendanceNetworkStore"
-  );
   const { appendSemesterEvent } = await import(
     "../src/services/syncMasterDataEmitters"
   );
@@ -263,17 +240,6 @@ export async function seedMasterDataGraph(): Promise<{
   });
   if (!offering.ok) throw new Error(`createOffering failed: ${offering.code}`);
 
-  const location = await createLocation({
-    name: `${SYNC_TEST_PREFIX} Master Location ${counter}`,
-  });
-  if (!location.ok) throw new Error(`createLocation failed: ${location.code}`);
-
-  const network = await createAttendanceNetwork({
-    networkCode: unique("MNET"),
-    name: `${SYNC_TEST_PREFIX} Master Network`,
-  });
-  if (!network.ok) throw new Error(`createNetwork failed: ${network.code}`);
-
   // Lecturer identity is created directly because the application has no runtime
   // path for it; the event is emitted the same way the seeder does it.
   const { hashPassword } = await import("../src/lib/passwords");
@@ -330,10 +296,6 @@ export async function seedMasterDataGraph(): Promise<{
     semesterSyncId,
     courseOfferingId: offering.data.id,
     courseOfferingSyncId: await syncId("course_offerings", offering.data.id),
-    locationId: location.data.id,
-    locationSyncId: await syncId("locations", location.data.id),
-    networkId: network.data.id,
-    networkSyncId: await syncId("attendance_networks", network.data.id),
     lecturerId: lecturerId.id,
     lecturerSyncId: lecturerId.sync_id as string,
   };
@@ -405,11 +367,6 @@ export async function cleanupSyncTestFixtures(): Promise<void> {
     `DELETE FROM academic_sessions WHERE name LIKE '${SYNC_TEST_PREFIX}-ACAD-%'
                                      OR name LIKE '${SYNC_TEST_PREFIX}-MACAD-%'`
   );
-  await pool.query(
-    `DELETE FROM attendance_networks WHERE network_code LIKE '${SYNC_TEST_PREFIX}-NET-%'
-                                         OR network_code LIKE '${SYNC_TEST_PREFIX}-MNET-%'`
-  );
-  await pool.query(`DELETE FROM locations WHERE name LIKE '${SYNC_TEST_PREFIX} Location%'`);
   await pool.query(
     `DELETE FROM departments WHERE code LIKE '${SYNC_TEST_PREFIX}-DEPT-%'
                                 OR code LIKE '${SYNC_TEST_PREFIX}-MDEPT-%'`

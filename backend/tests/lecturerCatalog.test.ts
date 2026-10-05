@@ -47,13 +47,9 @@ let offeringClosedId = 0;
 let offeringLec2Id = 0;
 let offeringInactiveCourseId = 0;
 
-let networkActive1Id = 0;
-let networkActive2Id = 0;
-let networkInactiveId = 0;
 
-let locationActive1Id = 0;
-let locationActive2Id = 0;
-let locationInactiveId = 0;
+
+
 
 const ALL_USER_IDS = () => [
   adminUserId,
@@ -156,8 +152,6 @@ async function cleanupScopedData(): Promise<void> {
   await pool.query(`DELETE FROM users WHERE id = ANY($1::BIGINT[])`, [
     ALL_USER_IDS(),
   ]);
-  await pool.query(`DELETE FROM locations WHERE name LIKE 'LCAT-LOC%'`);
-  await pool.query(`DELETE FROM attendance_networks WHERE network_code LIKE 'LCAT-NET%'`);
   await pool.query(`DELETE FROM departments WHERE code LIKE 'LCAT%'`);
   await pool.query(`DELETE FROM faculties WHERE code LIKE 'LCAT%'`);
 }
@@ -254,38 +248,6 @@ before(async () => {
   );
   offeringInactiveCourseId = Number(offeringInactiveCourse.rows[0].id);
 
-  const netA1 = await pool.query(
-    `INSERT INTO attendance_networks (network_code, name)
-     VALUES ('LCAT-NET-A1', 'LCAT Network Active One') RETURNING id`
-  );
-  networkActive1Id = Number(netA1.rows[0].id);
-
-  const netA2 = await pool.query(
-    `INSERT INTO attendance_networks (network_code, name)
-     VALUES ('LCAT-NET-A2', 'LCAT Network Active Two') RETURNING id`
-  );
-  networkActive2Id = Number(netA2.rows[0].id);
-
-  const netI = await pool.query(
-    `INSERT INTO attendance_networks (network_code, name, status)
-     VALUES ('LCAT-NET-I1', 'LCAT Network Inactive', 'INACTIVE') RETURNING id`
-  );
-  networkInactiveId = Number(netI.rows[0].id);
-
-  const locA1 = await pool.query(
-    `INSERT INTO locations (name) VALUES ('LCAT-LOC-A1') RETURNING id`
-  );
-  locationActive1Id = Number(locA1.rows[0].id);
-
-  const locA2 = await pool.query(
-    `INSERT INTO locations (name) VALUES ('LCAT-LOC-A2') RETURNING id`
-  );
-  locationActive2Id = Number(locA2.rows[0].id);
-
-  const locI = await pool.query(
-    `INSERT INTO locations (name, status) VALUES ('LCAT-LOC-I1', 'INACTIVE') RETURNING id`
-  );
-  locationInactiveId = Number(locI.rows[0].id);
 
   const student = await pool.query(
     `INSERT INTO users (name, password_hash, role, status, username)
@@ -413,11 +375,7 @@ async function noProfileToken(): Promise<string> {
 // ---------------------------------------------------------------------------
 
 test("catalog endpoints require authentication", async () => {
-  for (const path of [
-    "/api/lecturer/attendance-networks",
-    "/api/lecturer/locations",
-    "/api/lecturer/course-offerings",
-  ]) {
+  for (const path of ["/api/lecturer/course-offerings"]) {
     const res = await get(path);
     assert.equal(res.status, 401, `${path} should require auth`);
   }
@@ -431,66 +389,13 @@ test("students cannot read the lecturer catalog", async () => {
   const token = cookieFrom(login);
   assert.ok(token);
 
-  for (const path of [
-    "/api/lecturer/attendance-networks",
-    "/api/lecturer/locations",
-    "/api/lecturer/course-offerings",
-  ]) {
+  for (const path of ["/api/lecturer/course-offerings"]) {
     const res = await get(path, cookieHeader(token!));
     assert.equal(res.status, 403, `${path} should reject students`);
     assertErrorCode(await res.json(), "FORBIDDEN");
   }
 });
 
-// ---------------------------------------------------------------------------
-// Attendance networks
-// ---------------------------------------------------------------------------
-
-test("only active networks are returned with safe display fields", async () => {
-  const token = await lecturer1Token();
-  const res = await get("/api/lecturer/attendance-networks", cookieHeader(token));
-  assert.equal(res.status, 200);
-
-  const body = (await res.json()) as {
-    data: Array<Record<string, unknown>>;
-  };
-  const ids = body.data.map((n) => n.id);
-  assert.ok(
-    ids.includes(networkActive1Id) && ids.includes(networkActive2Id),
-    "active networks must be included"
-  );
-  assert.ok(
-    !ids.includes(networkInactiveId),
-    "inactive networks must be excluded"
-  );
-
-  const a1 = body.data.find((n) => n.id === networkActive1Id)!;
-  assert.deepEqual(Object.keys(a1).sort(), ["id", "name", "networkCode"]);
-  assert.equal(a1.networkCode, "LCAT-NET-A1");
-  assert.equal(a1.name, "LCAT Network Active One");
-});
-
-// ---------------------------------------------------------------------------
-// Locations
-// ---------------------------------------------------------------------------
-
-test("only active locations are returned with safe display fields", async () => {
-  const token = await lecturer1Token();
-  const res = await get("/api/lecturer/locations", cookieHeader(token));
-  assert.equal(res.status, 200);
-
-  const body = (await res.json()) as {
-    data: Array<Record<string, unknown>>;
-  };
-  const ids = body.data.map((l) => l.id);
-  assert.ok(ids.includes(locationActive1Id) && ids.includes(locationActive2Id));
-  assert.ok(!ids.includes(locationInactiveId), "inactive locations must be excluded");
-
-  const l1 = body.data.find((l) => l.id === locationActive1Id)!;
-  assert.deepEqual(Object.keys(l1).sort(), ["description", "id", "name"]);
-  assert.equal(l1.name, "LCAT-LOC-A1");
-  assert.equal(l1.description, null);
-});
 
 // ---------------------------------------------------------------------------
 // Course offerings

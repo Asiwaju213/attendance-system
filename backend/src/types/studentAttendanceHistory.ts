@@ -5,8 +5,6 @@ export interface CompletedSessionHistory {
   startTime: string;
   endTime: string;
   lecturerName: string;
-  locationName: string;
-  attendanceNetworkName: string;
   status: StudentHistoryAttendanceStatus;
   markedAt: string | null;
 }

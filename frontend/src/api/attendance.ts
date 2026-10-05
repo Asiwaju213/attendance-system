@@ -4,8 +4,6 @@ import type {
   AdminAttendanceSession,
   AdminCourseOffering,
   AdminSessionFilters,
-  AttendanceLocation,
-  AttendanceNetwork,
   AttendanceSession,
   CorrectAttendanceRecordInput,
   CorrectAttendanceRecordResponse,
@@ -17,8 +15,6 @@ import type {
 
 export interface CreateAttendanceSessionInput {
   courseOfferingId: number;
-  attendanceNetworkId: number;
-  locationId: number;
   durationMinutes: number;
   lateThresholdMinutes: number;
 }
@@ -29,14 +25,6 @@ export function listAttendanceSessions(): Promise<{ data: AttendanceSession[] }>
 
 export function listCourseOfferings(): Promise<{ data: LecturerCourseOffering[] }> {
   return apiRequest("/lecturer/course-offerings");
-}
-
-export function listAttendanceNetworks(): Promise<{ data: AttendanceNetwork[] }> {
-  return apiRequest("/lecturer/attendance-networks");
-}
-
-export function listLocations(): Promise<{ data: AttendanceLocation[] }> {
-  return apiRequest("/lecturer/locations");
 }
 
 export function createAttendanceSession(
@@ -75,16 +63,6 @@ export function listAdminCourseOfferings(): Promise<{
   return apiRequest("/admin/course-offerings");
 }
 
-export function listAdminAttendanceNetworks(): Promise<{
-  data: AttendanceNetwork[];
-}> {
-  return apiRequest("/admin/attendance-networks");
-}
-
-export function listAdminLocations(): Promise<{ data: AttendanceLocation[] }> {
-  return apiRequest("/admin/locations");
-}
-
 export function getCourseOfferingAttendanceReport(
   courseOfferingId: number
 ): Promise<{ data: CourseOfferingAttendanceReport }> {
@@ -117,12 +95,6 @@ function buildFilterQuery(filters: AdminSessionFilters): string {
   }
   if (filters.lecturerId !== undefined) {
     params.set("lecturerId", String(filters.lecturerId));
-  }
-  if (filters.attendanceNetworkId !== undefined) {
-    params.set("attendanceNetworkId", String(filters.attendanceNetworkId));
-  }
-  if (filters.locationId !== undefined) {
-    params.set("locationId", String(filters.locationId));
   }
   if (filters.academicSessionId !== undefined) {
     params.set("academicSessionId", String(filters.academicSessionId));

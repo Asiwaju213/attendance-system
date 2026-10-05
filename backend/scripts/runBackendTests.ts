@@ -13,7 +13,16 @@ function runTsx(args: string[]): Promise<number> {
       [require.resolve("tsx/cli"), ...args],
       {
         cwd: backendDir,
-        env: { ...process.env },
+        // STUDENT_ACCESS_MODE=edge for the child processes, because the default app instance the
+        // suites import must be the K12 edge: the student-facing suites (device login,
+        // enrollment, attendance, registration) describe that deployment, and with the
+        // fail-closed `cloud` default they could not mint a student session at all.
+        //
+        // It is set here rather than left to backend/.env so the suite behaves the same on every
+        // machine - dotenv does not overwrite an existing value - and so a developer's local .env
+        // cannot change what the tests exercise. Cloud-mode behaviour is asserted explicitly in
+        // tests/studentAccessPolicy.test.ts, which builds its own apps in both modes.
+        env: { ...process.env, STUDENT_ACCESS_MODE: "edge" },
         stdio: "inherit",
       }
     );

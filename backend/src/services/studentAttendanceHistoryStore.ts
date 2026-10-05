@@ -19,8 +19,6 @@ interface SessionHistoryRow {
   start_time: Date;
   end_time: Date;
   lecturer_name: string | null;
-  location_name: string;
-  network_name: string;
   record_status: "PRESENT" | "LATE" | null;
   marked_at: Date | null;
 }
@@ -31,8 +29,6 @@ function toCompletedSession(row: SessionHistoryRow): CompletedSessionHistory {
     startTime: row.start_time.toISOString(),
     endTime: row.end_time.toISOString(),
     lecturerName: row.lecturer_name ?? "Unknown",
-    locationName: row.location_name,
-    attendanceNetworkName: row.network_name,
     status: (row.record_status ?? "ABSENT") as StudentHistoryAttendanceStatus,
     markedAt: row.marked_at ? row.marked_at.toISOString() : null,
   };
@@ -93,8 +89,6 @@ export async function getStudentAttendanceHistory(
             s.start_time,
             s.end_time,
             u.name AS lecturer_name,
-            loc.name AS location_name,
-            net.name AS network_name,
             ar.status AS record_status,
             ar.marked_at
      FROM course_offerings o
@@ -112,8 +106,6 @@ export async function getStudentAttendanceHistory(
      JOIN course_offering_lecturers col ON col.course_offering_id = o.id
      JOIN lecturers lec ON lec.id = col.lecturer_id
      JOIN users u ON u.id = lec.user_id
-     JOIN locations loc ON loc.id = s.location_id
-     JOIN attendance_networks net ON net.id = s.attendance_network_id
      LEFT JOIN attendance_records ar
        ON ar.session_id = s.id
       AND ar.student_id = $1

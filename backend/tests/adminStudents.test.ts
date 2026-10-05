@@ -195,8 +195,6 @@ async function cleanupFixtures(): Promise<void> {
   );
   await pool.query(`DELETE FROM courses WHERE course_code LIKE 'ASM-%'`);
   await pool.query(`DELETE FROM academic_sessions WHERE name LIKE 'ASM-%'`);
-  await pool.query(`DELETE FROM attendance_networks WHERE network_code LIKE 'ASM-%'`);
-  await pool.query(`DELETE FROM locations WHERE name LIKE 'ASM-%'`);
   await pool.query(
     `DELETE FROM sessions
      WHERE user_id IN (
@@ -282,19 +280,6 @@ before(async () => {
   );
   offeringBId = Number(offeringB.rows[0].id);
 
-  const network = await pool.query(
-    `INSERT INTO attendance_networks (network_code, name)
-     VALUES ($1, 'ASM Net') RETURNING id`,
-    [`ASM-NET-${RUN_ID}`]
-  );
-  const networkId = Number(network.rows[0].id);
-
-  const location = await pool.query(
-    `INSERT INTO locations (name) VALUES ($1) RETURNING id`,
-    [`ASM-LOC-${RUN_ID}`]
-  );
-  const locationId = Number(location.rows[0].id);
-
   const admin = await pool.query(
     `INSERT INTO users (name, password_hash, role, status, username)
      VALUES ('ASM Admin', $1, 'ADMIN', 'ACTIVE', 'ASM_ADMIN_' || $2) RETURNING id`,
@@ -334,18 +319,12 @@ before(async () => {
   );
   const sessionId = await pool.query(
     `INSERT INTO attendance_sessions
-       (course_offering_id, started_by_lecturer_id, attendance_network_id,
-        location_id, start_time, end_time, late_threshold, status, ended_at)
-     VALUES ($1, $2, $3, $4,
+       (course_offering_id, started_by_lecturer_id, start_time, end_time, late_threshold, status, ended_at)
+     VALUES ($1, $2,
              now() - interval '2 hours', now() - interval '1 hour',
              interval '10 minutes', 'ENDED', now() - interval '1 hour')
      RETURNING id`,
-    [
-      offeringAId,
-      Number(sessionLecturerProfile.rows[0].id),
-      networkId,
-      locationId,
-    ]
+    [offeringAId, Number(sessionLecturerProfile.rows[0].id)]
   );
   attendanceSessionId = Number(sessionId.rows[0].id);
 

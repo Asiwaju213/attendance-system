@@ -14,9 +14,6 @@ const E2E_MONITOR_LECTURER_STAFF_ID = "E2E/LEC/0002";
 const E2E_STUDENT_MARK_LECTURER_STAFF_ID = "E2E/LEC/0003";
 const E2E_ADMIN_USERNAME = "e2e_admin";
 
-const E2E_NETWORK_CODE = "E2E-NET-001";
-const E2E_NETWORK_NAME = "E2E Test Network";
-const E2E_LOCATION_NAME = "E2E Test Lecture Hall";
 const E2E_ACADEMIC_SESSION_NAME = "E2E-2026/2027";
 const E2E_COURSE_CODE = "E2E-101";
 const E2E_COURSE_TITLE = "E2E Computer Science 101";
@@ -352,10 +349,6 @@ async function cleanup(): Promise<void> {
      WHERE department_id = (SELECT id FROM departments WHERE code = $1)`,
     [E2E_DEPARTMENT_CODE]
   );
-  await pool.query(`DELETE FROM attendance_networks WHERE network_code = $1`, [
-    E2E_NETWORK_CODE,
-  ]);
-  await pool.query(`DELETE FROM locations WHERE name = $1`, [E2E_LOCATION_NAME]);
   await pool.query(`DELETE FROM departments WHERE code = $1`, [E2E_DEPARTMENT_CODE]);
   await pool.query(`DELETE FROM faculties WHERE code = $1`, [E2E_FACULTY_CODE]);
 }
@@ -474,34 +467,6 @@ async function seed(): Promise<void> {
   ) {
     throw new Error("E2E lecturer profiles were not created.");
   }
-
-  await pool.query(
-    `INSERT INTO attendance_networks (network_code, name)
-     VALUES ($1, $2)
-     ON CONFLICT (network_code) DO NOTHING`,
-    [E2E_NETWORK_CODE, E2E_NETWORK_NAME]
-  );
-  const networkId = Number(
-    (
-      await pool.query(
-        `SELECT id FROM attendance_networks WHERE network_code = $1`,
-        [E2E_NETWORK_CODE]
-      )
-    ).rows[0].id
-  );
-
-  await pool.query(
-    `INSERT INTO locations (name)
-     VALUES ($1)`,
-    [E2E_LOCATION_NAME]
-  );
-  const locationId = Number(
-    (
-      await pool.query(`SELECT id FROM locations WHERE name = $1`, [
-        E2E_LOCATION_NAME,
-      ])
-    ).rows[0].id
-  );
 
   await pool.query(
     `INSERT INTO academic_sessions (name, is_active)
@@ -712,15 +677,15 @@ async function seed(): Promise<void> {
 
   const sessionThreeRes = await pool.query(
     `INSERT INTO attendance_sessions
-       (course_offering_id, started_by_lecturer_id, attendance_network_id,
-        location_id, start_time, end_time, late_threshold, status, created_at, ended_at)
+       (course_offering_id, started_by_lecturer_id,
+        start_time, end_time, late_threshold, status, created_at, ended_at)
      VALUES
-       ($1, $2, $3, $4,
+       ($1, $2,
         now() - interval '3 days', now() - interval '3 days' + interval '60 minutes',
         interval '5 minutes', 'ENDED', now() - interval '3 days',
         now() - interval '3 days' + interval '60 minutes')
      RETURNING id`,
-    [openOfferingThreeId, lecturerProfileId, networkId, locationId]
+    [openOfferingThreeId, lecturerProfileId]
   );
   const sessionThreeId = Number(sessionThreeRes.rows[0].id);
 
@@ -741,24 +706,24 @@ async function seed(): Promise<void> {
 
   await pool.query(
     `INSERT INTO attendance_sessions
-       (course_offering_id, started_by_lecturer_id, attendance_network_id,
-        location_id, start_time, end_time, late_threshold, status, created_at)
+       (course_offering_id, started_by_lecturer_id,
+        start_time, end_time, late_threshold, status, created_at)
      VALUES
-       ($1, $2, $3, $4,
+       ($1, $2,
         now() - interval '30 minutes', now() + interval '30 minutes',
         interval '5 minutes', 'ACTIVE', now() - interval '30 minutes')`,
-    [openOfferingId, monitorLecturerProfileId, networkId, locationId]
+    [openOfferingId, monitorLecturerProfileId]
   );
   await pool.query(
     `INSERT INTO attendance_sessions
-       (course_offering_id, started_by_lecturer_id, attendance_network_id,
-        location_id, start_time, end_time, late_threshold, status, created_at, ended_at)
+       (course_offering_id, started_by_lecturer_id,
+        start_time, end_time, late_threshold, status, created_at, ended_at)
      VALUES
-       ($1, $2, $3, $4,
+       ($1, $2,
         now() - interval '2 days', now() - interval '2 days' + interval '60 minutes',
         interval '5 minutes', 'ENDED', now() - interval '2 days',
         now() - interval '2 days' + interval '60 minutes')`,
-    [openOfferingId, monitorLecturerProfileId, networkId, locationId]
+    [openOfferingId, monitorLecturerProfileId]
   );
   // An ACTIVE session for the student-marking tests, intentionally left
   // unmarked so the student spec sees an eligible session with a mark action.
@@ -767,13 +732,13 @@ async function seed(): Promise<void> {
   // fixtures (E2E/LEC/0001 starts its own sessions) stay independent.
   await pool.query(
     `INSERT INTO attendance_sessions
-       (course_offering_id, started_by_lecturer_id, attendance_network_id,
-        location_id, start_time, end_time, late_threshold, status, created_at)
+       (course_offering_id, started_by_lecturer_id,
+        start_time, end_time, late_threshold, status, created_at)
      VALUES
-       ($1, $2, $3, $4,
+       ($1, $2,
         now() - interval '30 minutes', now() + interval '30 minutes',
         interval '5 minutes', 'ACTIVE', now() - interval '30 minutes')`,
-    [openOfferingId, studentMarkLecturerProfileId, networkId, locationId]
+    [openOfferingId, studentMarkLecturerProfileId]
   );
 
   // Seed attendance records for the E2E student in both monitor sessions

@@ -554,7 +554,7 @@ test("a lecturer who still owes a password change is blocked from every other AP
   assert.equal(me.status, 200);
   assert.equal(((await me.json()) as { user: Record<string, unknown> }).user.mustChangePassword, true);
 
-  const ownRole = await getJson("/api/lecturer/locations", cookieHeader(token));
+  const ownRole = await getJson("/api/lecturer/course-offerings", cookieHeader(token));
   assert.equal(ownRole.status, 403);
   assert.equal((await assertJson(ownRole)).error, "PASSWORD_CHANGE_REQUIRED");
 
@@ -718,10 +718,10 @@ test("a successful change clears the flag, replaces the hash, revokes other sess
   );
 
   // The session that performed the change stays usable; the other one was revoked.
-  const stillBlocked = await getJson("/api/lecturer/locations", cookieHeader(secondToken));
+  const stillBlocked = await getJson("/api/lecturer/course-offerings", cookieHeader(secondToken));
   assert.equal(stillBlocked.status, 401, "other sessions must be revoked by the change");
 
-  const unblocked = await getJson("/api/lecturer/locations", cookieHeader(token));
+  const unblocked = await getJson("/api/lecturer/course-offerings", cookieHeader(token));
   assert.equal(unblocked.status, 200);
 
   const me = await getJson("/api/auth/me", cookieHeader(token));

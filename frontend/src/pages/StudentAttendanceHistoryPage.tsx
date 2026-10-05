@@ -324,12 +324,6 @@ export function StudentAttendanceHistoryPage() {
                         <p className="session-list__meta">
                           Lecturer: {session.lecturerName}
                         </p>
-                        <p className="session-list__meta">
-                          Location: {session.locationName}
-                        </p>
-                        <p className="session-list__meta">
-                          Attendance network: {session.attendanceNetworkName}
-                        </p>
                         {session.markedAt !== null ? (
                           <p className="session-list__meta">
                             Marked at {formatDateTime(session.markedAt)}

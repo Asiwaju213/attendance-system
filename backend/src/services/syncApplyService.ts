@@ -1,8 +1,10 @@
 import { pool } from "../db/pool";
+import { SYNC_ATTENDANCE_SESSION_VERSION, SYNC_PAYLOAD_VERSION } from "../config/sync";
 import type { SyncChangeEvent, SyncedAttendanceSession } from "../types/sync";
 import {
   applyMasterDataEvent,
   isMasterDataEntityType,
+  isRetiredEntityType,
 } from "./syncMasterDataAppliers";
 import { SyncApplyError } from "./syncErrors";
 
@@ -98,12 +100,18 @@ function assertContiguous(
 
 /** A session payload that cannot be stored as-is. */
 function assertUsableSession(payload: SyncedAttendanceSession): void {
+  if (
+    payload.version !== SYNC_PAYLOAD_VERSION &&
+    payload.version !== SYNC_ATTENDANCE_SESSION_VERSION
+  ) {
+    throw new SyncApplyError(
+      `Cloud attendance_session payload version ${payload.version} is not supported.`
+    );
+  }
   const numeric = [
     payload.cloudSessionId,
     payload.cloudCourseOfferingId,
     payload.cloudLecturerId,
-    payload.cloudAttendanceNetworkId,
-    payload.cloudLocationId,
   ];
   if (numeric.some((value) => !Number.isFinite(value))) {
     throw new SyncApplyError(
@@ -142,6 +150,8 @@ export async function applyChangeBatch(
   for (const event of events) {
     if (event.entityType === "attendance_session") {
       assertUsableSession(event.payload as SyncedAttendanceSession);
+    } else if (isRetiredEntityType(event.entityType)) {
+      // Nothing to check: the payload describes a table migration 018 dropped.
     } else if (!isMasterDataEntityType(event.entityType)) {
       // Refusing is deliberate. Skipping an entity type this edge does not
       // understand would advance the cursor past data it never applied.
@@ -194,6 +204,13 @@ export async function applyChangeBatch(
         continue;
       }
 
+      if (isRetiredEntityType(event.entityType)) {
+        // Claimed above, so the cursor moves on and a re-delivery is still
+        // skipped; nothing is written because the entity no longer exists.
+        applied += 1;
+        continue;
+      }
+
       if (isMasterDataEntityType(event.entityType)) {
         await applyMasterDataEvent(client, event);
         applied += 1;
@@ -208,18 +225,16 @@ export async function applyChangeBatch(
       await client.query(
         `INSERT INTO sync_attendance_sessions
 (cloud_sync_id, cloud_session_id, cloud_course_offering_id,
-             cloud_lecturer_id, cloud_attendance_network_id, cloud_location_id,
+             cloud_lecturer_id,
              course_code, course_title, lecturer_display_name, lecturer_staff_id,
              start_time, end_time,
              late_threshold_minutes, status, ended_at,
              source_event_cursor, last_synced_at)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, now())
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, now())
          ON CONFLICT (cloud_sync_id) DO UPDATE SET
            cloud_session_id = EXCLUDED.cloud_session_id,
            cloud_course_offering_id = EXCLUDED.cloud_course_offering_id,
            cloud_lecturer_id = EXCLUDED.cloud_lecturer_id,
-           cloud_attendance_network_id = EXCLUDED.cloud_attendance_network_id,
-           cloud_location_id = EXCLUDED.cloud_location_id,
            course_code = EXCLUDED.course_code,
            course_title = EXCLUDED.course_title,
            lecturer_display_name = EXCLUDED.lecturer_display_name,
@@ -236,8 +251,6 @@ export async function applyChangeBatch(
           session.cloudSessionId,
           session.cloudCourseOfferingId,
           session.cloudLecturerId,
-          session.cloudAttendanceNetworkId,
-          session.cloudLocationId,
           session.courseCode,
           session.courseTitle,
           session.lecturerDisplayName,

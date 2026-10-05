@@ -8,14 +8,10 @@ import { FormError } from "../components/FormError";
 import {
   createAttendanceSession,
   endAttendanceSession,
-  listAttendanceNetworks,
   listAttendanceSessions,
   listCourseOfferings,
-  listLocations,
 } from "../api/attendance";
 import type {
-  AttendanceLocation,
-  AttendanceNetwork,
   AttendanceSession,
   LecturerCourseOffering,
 } from "../types/attendance";
@@ -28,8 +24,6 @@ type PresetValue = number | typeof CUSTOM;
 
 interface FormFieldErrors {
   offeringId?: string;
-  networkId?: string;
-  locationId?: string;
   durationMinutes?: string;
   lateThresholdMinutes?: string;
 }
@@ -91,17 +85,11 @@ export function LecturerAttendancePage() {
   const [sessionsError, setSessionsError] = useState<string | null>(null);
   const [offerings, setOfferings] = useState<LecturerCourseOffering[] | null>(null);
   const [offeringsError, setOfferingsError] = useState<string | null>(null);
-  const [networks, setNetworks] = useState<AttendanceNetwork[] | null>(null);
-  const [networksError, setNetworksError] = useState<string | null>(null);
-  const [locations, setLocations] = useState<AttendanceLocation[] | null>(null);
-  const [locationsError, setLocationsError] = useState<string | null>(null);
 
   const [reloadKey, setReloadKey] = useState(0);
   const [isLoggingOut, setIsLoggingOut] = useState(false);
 
   const [offeringId, setOfferingId] = useState("");
-  const [networkId, setNetworkId] = useState("");
-  const [locationId, setLocationId] = useState("");
   const [durationPreset, setDurationPreset] = useState<PresetValue>(60);
   const [customDuration, setCustomDuration] = useState("");
   const [latePreset, setLatePreset] = useState<PresetValue>(5);
@@ -117,8 +105,6 @@ export function LecturerAttendancePage() {
   const [now, setNow] = useState(() => Date.now());
 
   const offeringSelectId = useId();
-  const networkSelectId = useId();
-  const locationSelectId = useId();
   const customDurationId = useId();
   const customLateId = useId();
 
@@ -126,12 +112,10 @@ export function LecturerAttendancePage() {
     let cancelled = false;
 
     async function load() {
-      const [sessionsResult, offeringsResult, networksResult, locationsResult] =
+      const [sessionsResult, offeringsResult] =
         await Promise.allSettled([
           listAttendanceSessions(),
           listCourseOfferings(),
-          listAttendanceNetworks(),
-          listLocations(),
         ]);
 
       if (cancelled) {
@@ -147,16 +131,6 @@ export function LecturerAttendancePage() {
         setOfferings(offeringsResult.value.data);
       } else {
         setOfferingsError(attendanceErrorMessage(offeringsResult.reason));
-      }
-      if (networksResult.status === "fulfilled") {
-        setNetworks(networksResult.value.data);
-      } else {
-        setNetworksError(attendanceErrorMessage(networksResult.reason));
-      }
-      if (locationsResult.status === "fulfilled") {
-        setLocations(locationsResult.value.data);
-      } else {
-        setLocationsError(attendanceErrorMessage(locationsResult.reason));
       }
     }
 
@@ -217,20 +191,12 @@ export function LecturerAttendancePage() {
   const selectedOffering = offerings?.find(
     (offering) => offering.id === Number(offeringId)
   );
-  const selectedNetwork = networks?.find((network) => network.id === Number(networkId));
-  const selectedLocation = locations?.find((location) => location.id === Number(locationId));
 
   function validateForm(): FormFieldErrors {
     const errors: FormFieldErrors = {};
 
     if (offeringId === "") {
       errors.offeringId = "Please select a course offering.";
-    }
-    if (networkId === "") {
-      errors.networkId = "Please select an attendance network.";
-    }
-    if (locationId === "") {
-      errors.locationId = "Please select a location.";
     }
 
     if (durationPreset === CUSTOM) {
@@ -292,14 +258,10 @@ export function LecturerAttendancePage() {
     try {
       await createAttendanceSession({
         courseOfferingId: Number(offeringId),
-        attendanceNetworkId: Number(networkId),
-        locationId: Number(locationId),
         durationMinutes,
         lateThresholdMinutes,
       });
       setOfferingId("");
-      setNetworkId("");
-      setLocationId("");
       setDurationPreset(60);
       setCustomDuration("");
       setLatePreset(5);
@@ -351,25 +313,12 @@ export function LecturerAttendancePage() {
     );
   }
 
-  const catalogHasError =
-    offeringsError !== null ||
-    networksError !== null ||
-    locationsError !== null;
-  const catalogLoading =
-    offerings === null && offeringsError === null &&
-    networks === null && networksError === null &&
-    locations === null && locationsError === null;
+  const catalogHasError = offeringsError !== null;
+  const catalogLoading = offerings === null && offeringsError === null;
 
   const offeringSummary = selectedOffering
     ? `${selectedOffering.courseCode} — ${selectedOffering.courseTitle} (Level ${selectedOffering.levelName}, ${selectedOffering.semesterName})`
     : "";
-  const networkSummary = selectedNetwork
-    ? `${selectedNetwork.networkCode} — ${selectedNetwork.name}`
-    : "";
-  const locationSummary = selectedLocation
-    ? `${selectedLocation.name}`
-    : "";
-
   return (
     <main className="app-page lecturer-attendance-page">
       <header className="app-header lecturer-attendance-header">
@@ -427,14 +376,6 @@ export function LecturerAttendancePage() {
               <span className={`session-status session-status--${activeSession.currentState.toLowerCase()}`}>
                 {stateLabel(activeSession)}
               </span>
-            </p>
-            <p>
-              <span className="app-detail__label">Network: </span>
-              {activeSession.attendanceNetworkName}
-            </p>
-            <p>
-              <span className="app-detail__label">Location: </span>
-              {activeSession.locationName}
             </p>
             <div className="lecturer-session-timing">
               <div className="lecturer-session-timing__item">
@@ -581,55 +522,6 @@ export function LecturerAttendancePage() {
                 </div>
 
                 <div className="field">
-                  <label htmlFor={networkSelectId} className="field__label">
-                    Attendance network
-                  </label>
-                  <select
-                    id={networkSelectId}
-                    name="attendanceNetworkId"
-                    className="field__input"
-                    value={networkId}
-                    onChange={(event) => setNetworkId(event.target.value)}
-                    aria-invalid={fieldErrors.networkId !== undefined || undefined}
-                  >
-                    <option value="">Select an attendance network…</option>
-                    {networks?.map((network) => (
-                      <option key={network.id} value={network.id}>
-                        {network.networkCode} — {network.name}
-                      </option>
-                    ))}
-                  </select>
-                  {fieldErrors.networkId !== undefined ? (
-                    <p className="field__error">{fieldErrors.networkId}</p>
-                  ) : null}
-                </div>
-
-                <div className="field">
-                  <label htmlFor={locationSelectId} className="field__label">
-                    Location
-                  </label>
-                  <select
-                    id={locationSelectId}
-                    name="locationId"
-                    className="field__input"
-                    value={locationId}
-                    onChange={(event) => setLocationId(event.target.value)}
-                    aria-invalid={fieldErrors.locationId !== undefined || undefined}
-                  >
-                    <option value="">Select a location…</option>
-                    {locations?.map((location) => (
-                      <option key={location.id} value={location.id}>
-                        {location.name}
-                        {location.description ? ` — ${location.description}` : ""}
-                      </option>
-                    ))}
-                  </select>
-                  {fieldErrors.locationId !== undefined ? (
-                    <p className="field__error">{fieldErrors.locationId}</p>
-                  ) : null}
-                </div>
-
-                <div className="field">
                   <fieldset className="preset-fieldset">
                     <legend className="field__label">Duration</legend>
                     <div className="preset-options">
@@ -744,14 +636,6 @@ export function LecturerAttendancePage() {
                     {offeringSummary || "—"}
                   </p>
                   <p>
-                    <span className="app-detail__label">Attendance network: </span>
-                    {networkSummary || "—"}
-                  </p>
-                  <p>
-                    <span className="app-detail__label">Location: </span>
-                    {locationSummary || "—"}
-                  </p>
-                  <p>
                     <span className="app-detail__label">Duration: </span>
                     {durationPreset === CUSTOM
                       ? customDuration.trim() !== "" && Number.isInteger(durationMinutes)
@@ -825,10 +709,6 @@ export function LecturerAttendancePage() {
                     {historyStateLabel(session)}
                   </span>
                 </div>
-
-                <p className="session-list__meta">
-                  {session.attendanceNetworkName} · {session.locationName}
-                </p>
 
                 <div className="lecturer-session-record__timing">
                   <div className="lecturer-session-timing__item">

@@ -203,51 +203,6 @@ export async function appendCourseOfferingEvent(
   });
 }
 
-export async function appendLocationEvent(
-  client: PoolClient,
-  operation: SyncOperation,
-  locationId: number
-): Promise<void> {
-  const result = await client.query(
-    `SELECT id, sync_id, name, description, status FROM locations WHERE id = $1`,
-    [locationId]
-  );
-  const row = result.rows[0];
-  if (!row) throw missing("location", locationId);
-
-  await appendChangeEvent(client, "location", row.sync_id, operation, {
-    version: SYNC_PAYLOAD_VERSION,
-    syncId: row.sync_id,
-    cloudLocationId: Number(row.id),
-    name: row.name,
-    description: row.description ?? null,
-    status: row.status,
-  });
-}
-
-export async function appendAttendanceNetworkEvent(
-  client: PoolClient,
-  operation: SyncOperation,
-  networkId: number
-): Promise<void> {
-  const result = await client.query(
-    `SELECT id, sync_id, network_code, name, status
-     FROM attendance_networks WHERE id = $1`,
-    [networkId]
-  );
-  const row = result.rows[0];
-  if (!row) throw missing("attendance network", networkId);
-
-  await appendChangeEvent(client, "attendance_network", row.sync_id, operation, {
-    version: SYNC_PAYLOAD_VERSION,
-    syncId: row.sync_id,
-    cloudAttendanceNetworkId: Number(row.id),
-    networkCode: row.network_code,
-    name: row.name,
-    status: row.status,
-  });
-}
-
 /**
  * A lecturer event carries only the lecturer's public staff identity.
  *

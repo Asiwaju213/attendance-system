@@ -57,9 +57,6 @@ let offeringBId = 0; // open, assigned only to lec2
 let offeringClosedId = 0; // CLOSED, assigned to lec1
 let offeringInactiveId = 0; // OPEN but course INACTIVE, assigned to lec1
 
-let network1Id = 0;
-let location1Id = 0;
-
 let sessionMain = 0; // ENDED on offering A, started by lec1
 let sessionCoLec = 0; // ENDED on offering A, started by lec2 (co-assigned)
 let sessionActive = 0; // ACTIVE on offering A - lec1
@@ -161,8 +158,6 @@ async function cleanupScopedData(): Promise<void> {
   await pool.query(`DELETE FROM students WHERE user_id = ANY($1::BIGINT[])`, [userIds()]);
   await pool.query(`DELETE FROM lecturers WHERE user_id = ANY($1::BIGINT[])`, [userIds()]);
   await pool.query(`DELETE FROM users WHERE id = ANY($1::BIGINT[])`, [userIds()]);
-  await pool.query(`DELETE FROM attendance_networks WHERE network_code LIKE 'LECSesRep%'`);
-  await pool.query(`DELETE FROM locations WHERE name LIKE 'LECSesRep%'`);
   await pool.query(`DELETE FROM departments WHERE code LIKE 'LECSesRep%'`);
   await pool.query(`DELETE FROM faculties WHERE code LIKE 'LECSesRep%'`);
 }
@@ -248,15 +243,14 @@ async function insertSession(
   endedAtOffsetMinutes: number | null
 ): Promise<number> {
   const result = await pool.query(
-    `INSERT INTO attendance_sessions
-       (course_offering_id, started_by_lecturer_id, attendance_network_id,
-        location_id, start_time, end_time, late_threshold, status, ended_at)
-     VALUES ($1, $2, $3, $4,
-             now() + ($5 * interval '1 minute'), now() + ($6 * interval '1 minute'),
-             '5 minutes', $7,
-             CASE WHEN $8::bigint IS NULL THEN NULL ELSE now() + ($8 * interval '1 minute') END)
+        `INSERT INTO attendance_sessions
+           (course_offering_id, started_by_lecturer_id, start_time, end_time, late_threshold, status, ended_at)
+         VALUES ($1, $2,
+           now() + ($3 * interval '1 minute'), now() + ($4 * interval '1 minute'),
+           '5 minutes', $5,
+           CASE WHEN $6::bigint IS NULL THEN NULL ELSE now() + ($6 * interval '1 minute') END)
      RETURNING id`,
-    [offeringId, lecturerId, network1Id, location1Id, startOffsetMinutes, endOffsetMinutes, status, endedAtOffsetMinutes]
+        [offeringId, lecturerId, startOffsetMinutes, endOffsetMinutes, status, endedAtOffsetMinutes]
   );
   return Number(result.rows[0].id);
 }
@@ -339,17 +333,6 @@ before(async () => {
     acadSessionAId,
     secondSemesterId
   );
-
-  const net1 = await pool.query(
-    `INSERT INTO attendance_networks (network_code, name)
-     VALUES ('LECSesRep-NET1', 'LECSesRep Network One') RETURNING id`
-  );
-  network1Id = Number(net1.rows[0].id);
-
-  const loc1 = await pool.query(
-    `INSERT INTO locations (name) VALUES ('LECSesRep-LOC1') RETURNING id`
-  );
-  location1Id = Number(loc1.rows[0].id);
 
   const lec1 = await insertLecturer(LEC1_STAFF_ID, "LECSesRep Lecturer One");
   lecturer1UserId = lec1.userId;
@@ -594,8 +577,6 @@ test("assigned lecturer retrieves the report with complete session metadata", as
   assert.equal(session.academicSession, "LECSesRep-ACAD-A");
   assert.equal(session.semester, "First Semester");
   assert.equal(session.level, 100);
-  assert.equal(session.attendanceNetworkName, "LECSesRep Network One");
-  assert.equal(session.locationName, "LECSesRep-LOC1");
   assert.equal(session.lateThresholdMinutes, 5);
   assert.equal(typeof session.startTime, "string");
   assert.equal(typeof session.endTime, "string");
@@ -783,14 +764,12 @@ test("the response exposes only the documented keys", async () => {
 
   assert.deepEqual(Object.keys(body.data!.session!).sort(), [
     "academicSession",
-    "attendanceNetworkName",
     "courseCode",
     "courseTitle",
     "endTime",
     "endedAt",
     "lateThresholdMinutes",
     "level",
-    "locationName",
     "semester",
     "sessionId",
     "startTime",

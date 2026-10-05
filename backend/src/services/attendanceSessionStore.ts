@@ -16,10 +16,6 @@ export type CreateSessionErrorCode =
   | "OFFERING_NOT_OPEN"
   | "COURSE_NOT_ACTIVE"
   | "LECTURER_NOT_ASSIGNED"
-  | "ATTENDANCE_NETWORK_NOT_FOUND"
-  | "ATTENDANCE_NETWORK_INACTIVE"
-  | "LOCATION_NOT_FOUND"
-  | "LOCATION_INACTIVE"
   | "ACTIVE_SESSION_EXISTS";
 
 export type CreateSessionResult =
@@ -48,10 +44,6 @@ interface SessionRow {
   started_by_lecturer_id: string;
   course_code: string;
   course_title: string;
-  attendance_network_id: string;
-  network_name: string;
-  location_id: string;
-  location_name: string;
   start_time: Date;
   end_time: Date;
   late_threshold_minutes: number;
@@ -63,8 +55,6 @@ interface SessionRow {
 const SESSION_SELECT = `
   SELECT s.id, s.course_offering_id, s.started_by_lecturer_id,
          c.course_code, c.title AS course_title,
-         s.attendance_network_id, n.name AS network_name,
-         s.location_id, l.name AS location_name,
          s.start_time, s.end_time,
          (EXTRACT(EPOCH FROM s.late_threshold) / 60)::int AS late_threshold_minutes,
          s.status, s.ended_at,
@@ -76,8 +66,6 @@ const SESSION_SELECT = `
   FROM attendance_sessions s
   JOIN course_offerings o ON o.id = s.course_offering_id
   JOIN courses c ON c.id = o.course_id
-  JOIN attendance_networks n ON n.id = s.attendance_network_id
-  JOIN locations l ON l.id = s.location_id
 `;
 
 const UNIQUE_VIOLATION_CODE = "23505";
@@ -126,10 +114,6 @@ function toSession(row: SessionRow): AttendanceSession {
     courseOfferingId: Number(row.course_offering_id),
     courseCode: row.course_code,
     courseTitle: row.course_title,
-    attendanceNetworkId: Number(row.attendance_network_id),
-    attendanceNetworkName: row.network_name,
-    locationId: Number(row.location_id),
-    locationName: row.location_name,
     startTime: row.start_time.toISOString(),
     endTime: row.end_time.toISOString(),
     lateThresholdMinutes: row.late_threshold_minutes,
@@ -215,34 +199,6 @@ export async function createAttendanceSession(
       return { ok: false, code: "LECTURER_NOT_ASSIGNED" };
     }
 
-    const networkResult = await client.query(
-      `SELECT id, name, status FROM attendance_networks WHERE id = $1`,
-      [input.attendanceNetworkId]
-    );
-    const networkRow = networkResult.rows[0];
-    if (!networkRow) {
-      await client.query("ROLLBACK");
-      return { ok: false, code: "ATTENDANCE_NETWORK_NOT_FOUND" };
-    }
-    if (networkRow.status !== "ACTIVE") {
-      await client.query("ROLLBACK");
-      return { ok: false, code: "ATTENDANCE_NETWORK_INACTIVE" };
-    }
-
-    const locationResult = await client.query(
-      `SELECT id, name, status FROM locations WHERE id = $1`,
-      [input.locationId]
-    );
-    const locationRow = locationResult.rows[0];
-    if (!locationRow) {
-      await client.query("ROLLBACK");
-      return { ok: false, code: "LOCATION_NOT_FOUND" };
-    }
-    if (locationRow.status !== "ACTIVE") {
-      await client.query("ROLLBACK");
-      return { ok: false, code: "LOCATION_INACTIVE" };
-    }
-
     // The partial unique index only understands status = 'ACTIVE', so an expired
     // ACTIVE row still blocks the index. Transition it to history (ended_at = its
     // scheduled end_time) immediately before inserting the new ACTIVE session.
@@ -270,16 +226,14 @@ export async function createAttendanceSession(
 
     const inserted = await client.query(
       `INSERT INTO attendance_sessions
-         (course_offering_id, started_by_lecturer_id, attendance_network_id,
-          location_id, start_time, end_time, late_threshold, status)
-       VALUES ($1, $2, $3, $4, now(), now() + ($5 * interval '1 minute'),
-               ($6 * interval '1 minute'), 'ACTIVE')
+       (course_offering_id, started_by_lecturer_id, start_time, end_time,
+        late_threshold, status)
+           VALUES ($1, $2, now(), now() + ($3 * interval '1 minute'),
+             ($4 * interval '1 minute'), 'ACTIVE')
        RETURNING id, sync_id`,
       [
         input.courseOfferingId,
         lecturerId,
-        input.attendanceNetworkId,
-        input.locationId,
         input.durationMinutes,
         input.lateThresholdMinutes,
       ]
@@ -319,8 +273,6 @@ export async function createAttendanceSession(
         cloudLecturerId: lecturerId,
         session: {
           courseOfferingId: session.courseOfferingId,
-          attendanceNetworkId: session.attendanceNetworkId,
-          locationId: session.locationId,
           courseCode: session.courseCode,
           courseTitle: session.courseTitle,
           lecturerDisplayName: lecturer.name,
@@ -419,8 +371,6 @@ export async function endSession(
         cloudLecturerId: lecturerId,
         session: {
           courseOfferingId: session.courseOfferingId,
-          attendanceNetworkId: session.attendanceNetworkId,
-          locationId: session.locationId,
           courseCode: session.courseCode,
           courseTitle: session.courseTitle,
           lecturerDisplayName: endedLecturer.name,
@@ -456,11 +406,6 @@ interface AdminSessionRow {
   lecturer_id: string;
   lecturer_staff_id: string;
   lecturer_name: string;
-  attendance_network_id: string;
-  attendance_network_code: string;
-  attendance_network_name: string;
-  location_id: string;
-  location_name: string;
   academic_session_id: string;
   academic_session_name: string;
   semester_id: string;
@@ -479,9 +424,6 @@ const ADMIN_SESSION_SELECT = `
          c.course_code, c.title AS course_title,
          lec.id AS lecturer_id, lec.staff_id AS lecturer_staff_id,
          lec_u.name AS lecturer_name,
-         s.attendance_network_id,
-         n.network_code AS attendance_network_code, n.name AS attendance_network_name,
-         s.location_id, l.name AS location_name,
          acad.id AS academic_session_id, acad.name AS academic_session_name,
          sem.id AS semester_id, sem.name AS semester_name,
          s.start_time, s.end_time,
@@ -497,8 +439,6 @@ const ADMIN_SESSION_SELECT = `
   JOIN courses c ON c.id = o.course_id
   JOIN lecturers lec ON lec.id = s.started_by_lecturer_id
   JOIN users lec_u ON lec_u.id = lec.user_id
-  JOIN attendance_networks n ON n.id = s.attendance_network_id
-  JOIN locations l ON l.id = s.location_id
   JOIN academic_sessions acad ON acad.id = o.academic_session_id
   JOIN semesters sem ON sem.id = o.semester_id
 `;
@@ -512,11 +452,6 @@ function toAdminSession(row: AdminSessionRow): AdminAttendanceSession {
     lecturerId: Number(row.lecturer_id),
     lecturerStaffId: row.lecturer_staff_id,
     lecturerName: row.lecturer_name,
-    attendanceNetworkId: Number(row.attendance_network_id),
-    attendanceNetworkCode: row.attendance_network_code,
-    attendanceNetworkName: row.attendance_network_name,
-    locationId: Number(row.location_id),
-    locationName: row.location_name,
     academicSessionId: Number(row.academic_session_id),
     academicSessionName: row.academic_session_name,
     semesterId: Number(row.semester_id),
@@ -546,16 +481,6 @@ export async function listAdminSessions(
   if (filters.lecturerId !== undefined) {
     conditions.push(`s.started_by_lecturer_id = $${idx}`);
     params.push(filters.lecturerId);
-    idx++;
-  }
-  if (filters.attendanceNetworkId !== undefined) {
-    conditions.push(`s.attendance_network_id = $${idx}`);
-    params.push(filters.attendanceNetworkId);
-    idx++;
-  }
-  if (filters.locationId !== undefined) {
-    conditions.push(`s.location_id = $${idx}`);
-    params.push(filters.locationId);
     idx++;
   }
   if (filters.academicSessionId !== undefined) {

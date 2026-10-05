@@ -37,13 +37,11 @@ import type { SyncOperation } from "../src/types/sync";
 import { pool } from "../src/db/pool";
 import {
   appendAcademicSessionEvent,
-  appendAttendanceNetworkEvent,
   appendCourseEvent,
   appendCourseOfferingEvent,
   appendDepartmentEvent,
   appendFacultyEvent,
   appendLevelEvent,
-  appendLocationEvent,
   appendLecturerEvent,
   appendSemesterEvent,
 } from "../src/services/syncMasterDataEmitters";
@@ -119,8 +117,6 @@ const EMITTERS: ReadonlyArray<{ table: string; emit: MasterDataEmitter }> = [
   { table: "semesters", emit: appendSemesterEvent },
   { table: "courses", emit: appendCourseEvent },
   { table: "course_offerings", emit: appendCourseOfferingEvent },
-  { table: "locations", emit: appendLocationEvent },
-  { table: "attendance_networks", emit: appendAttendanceNetworkEvent },
   { table: "lecturers", emit: appendLecturerEvent },
 ];
 

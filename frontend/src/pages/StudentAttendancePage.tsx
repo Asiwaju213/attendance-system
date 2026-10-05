@@ -259,9 +259,6 @@ export function StudentAttendancePage() {
 
                   <div className="attendance-session-card__details">
                     <p className="session-list__meta">
-                      {session.attendanceNetworkName} · {session.locationName}
-                    </p>
-                    <p className="session-list__meta">
                       {formatDateTime(session.startTime)} –{" "}
                       {formatDateTime(session.endTime)}
                     </p>

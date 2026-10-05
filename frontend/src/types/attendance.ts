@@ -9,10 +9,6 @@ export interface AttendanceSession {
   courseOfferingId: number;
   courseCode: string;
   courseTitle: string;
-  attendanceNetworkId: number;
-  attendanceNetworkName: string;
-  locationId: number;
-  locationName: string;
   startTime: string;
   endTime: string;
   lateThresholdMinutes: number;
@@ -25,7 +21,6 @@ export interface AdminAttendanceSession extends AttendanceSession {
   lecturerId: number;
   lecturerStaffId: string;
   lecturerName: string;
-  attendanceNetworkCode: string;
   academicSessionId: number;
   academicSessionName: string;
   semesterId: number;
@@ -36,25 +31,11 @@ export interface AdminAttendanceSession extends AttendanceSession {
 export interface AdminSessionFilters {
   courseOfferingId?: number;
   lecturerId?: number;
-  attendanceNetworkId?: number;
-  locationId?: number;
   academicSessionId?: number;
   semesterId?: number;
   status?: SessionStatus;
   from?: string;
   to?: string;
-}
-
-export interface AttendanceNetwork {
-  id: number;
-  networkCode: string;
-  name: string;
-}
-
-export interface AttendanceLocation {
-  id: number;
-  name: string;
-  description: string | null;
 }
 
 export interface LecturerCourseOffering {
@@ -95,8 +76,6 @@ export interface EligibleAttendanceSession {
   startTime: string;
   endTime: string;
   lateThresholdMinutes: number;
-  attendanceNetworkName: string;
-  locationName: string;
   currentAttendanceState: AttendanceState;
 }
 
@@ -179,8 +158,6 @@ export interface StudentCourseHistorySession {
   startTime: string;
   endTime: string;
   lecturerName: string;
-  locationName: string;
-  attendanceNetworkName: string;
   status: StudentHistoryAttendanceStatus;
   markedAt: string | null;
 }
@@ -215,8 +192,6 @@ export interface LecturerReportSessionDetail {
   startTime: string;
   endTime: string;
   lecturerName: string;
-  locationName: string;
-  attendanceNetworkName: string;
   status: LecturerReportAttendanceStatus;
   markedAt: string | null;
 }
@@ -270,8 +245,6 @@ export interface LecturerSessionAttendanceReport {
     academicSession: string;
     semester: string;
     level: number;
-    attendanceNetworkName: string;
-    locationName: string;
     startTime: string;
     endTime: string;
     lateThresholdMinutes: number;

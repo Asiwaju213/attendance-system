@@ -1,6 +1,6 @@
 import type { PoolClient } from "pg";
 import { pool } from "../db/pool";
-import { SYNC_PAYLOAD_VERSION } from "../config/sync";
+import { SYNC_ATTENDANCE_SESSION_VERSION, SYNC_PAYLOAD_VERSION } from "../config/sync";
 import type {
   SyncChangeEvent,
   SyncEntityType,
@@ -59,8 +59,6 @@ export interface AttendanceSessionEventInput {
   cloudLecturerId: number;
   session: {
     courseOfferingId: number;
-    attendanceNetworkId: number;
-    locationId: number;
     courseCode: string;
     courseTitle: string;
     lecturerDisplayName: string;
@@ -85,13 +83,11 @@ function toSyncedAttendanceSession(
   input: AttendanceSessionEventInput
 ): SyncedAttendanceSession {
   return {
-    version: SYNC_PAYLOAD_VERSION,
+    version: SYNC_ATTENDANCE_SESSION_VERSION,
     syncId: input.syncId,
     cloudSessionId: input.cloudSessionId,
     cloudCourseOfferingId: input.session.courseOfferingId,
     cloudLecturerId: input.cloudLecturerId,
-    cloudAttendanceNetworkId: input.session.attendanceNetworkId,
-    cloudLocationId: input.session.locationId,
     courseCode: input.session.courseCode,
     courseTitle: input.session.courseTitle,
     lecturerDisplayName: input.session.lecturerDisplayName,

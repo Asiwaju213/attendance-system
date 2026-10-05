@@ -42,11 +42,6 @@ let offering1Id = 0;
 let offering2Id = 0;
 let offering3Id = 0;
 
-let network1Id = 0;
-let network2Id = 0;
-let location1Id = 0;
-let location2Id = 0;
-
 let sessionActiveId = 0;
 let sessionExpiredId = 0;
 let sessionEndedId = 0;
@@ -131,8 +126,6 @@ async function cleanupScopedData(): Promise<void> {
   await pool.query(`DELETE FROM students WHERE user_id = ANY($1::BIGINT[])`, [userIds()]);
   await pool.query(`DELETE FROM lecturers WHERE user_id = ANY($1::BIGINT[])`, [userIds()]);
   await pool.query(`DELETE FROM users WHERE id = ANY($1::BIGINT[])`, [userIds()]);
-  await pool.query(`DELETE FROM attendance_networks WHERE network_code LIKE 'ADMSessTest%'`);
-  await pool.query(`DELETE FROM locations WHERE name LIKE 'ADMSessTest%'`);
   await pool.query(`DELETE FROM departments WHERE code LIKE 'ADMSessTest%'`);
   await pool.query(`DELETE FROM faculties WHERE code LIKE 'ADMSessTest%'`);
 }
@@ -214,28 +207,6 @@ before(async () => {
   );
   offering3Id = Number(off3.rows[0].id);
 
-  const net1 = await pool.query(
-    `INSERT INTO attendance_networks (network_code, name)
-     VALUES ('ADMSessTest-NET1', 'ADMSessTest Network One') RETURNING id`
-  );
-  network1Id = Number(net1.rows[0].id);
-
-  const net2 = await pool.query(
-    `INSERT INTO attendance_networks (network_code, name)
-     VALUES ('ADMSessTest-NET2', 'ADMSessTest Network Two') RETURNING id`
-  );
-  network2Id = Number(net2.rows[0].id);
-
-  const loc1 = await pool.query(
-    `INSERT INTO locations (name) VALUES ('ADMSessTest-LOC1') RETURNING id`
-  );
-  location1Id = Number(loc1.rows[0].id);
-
-  const loc2 = await pool.query(
-    `INSERT INTO locations (name) VALUES ('ADMSessTest-LOC2') RETURNING id`
-  );
-  location2Id = Number(loc2.rows[0].id);
-
   const stu = await pool.query(
     `INSERT INTO users (name, password_hash, role, status, username)
      VALUES ('ADMSessTest Student', $1, 'STUDENT', 'ACTIVE', NULL) RETURNING id`,
@@ -283,48 +254,44 @@ before(async () => {
   // Session A: ACTIVE (lecturer1) - end_time in the future
   const sessA = await pool.query(
     `INSERT INTO attendance_sessions
-       (course_offering_id, started_by_lecturer_id, attendance_network_id,
-        location_id, start_time, end_time, late_threshold, status)
-     VALUES ($1, $2, $3, $4, now() - interval '10 minutes', now() + interval '50 minutes',
+       (course_offering_id, started_by_lecturer_id, start_time, end_time, late_threshold, status)
+     VALUES ($1, $2, now() - interval '10 minutes', now() + interval '50 minutes',
              '5 minutes', 'ACTIVE')
      RETURNING id`,
-    [offering1Id, lecturer1ProfileId, network1Id, location1Id]
+    [offering1Id, lecturer1ProfileId]
   );
   sessionActiveId = Number(sessA.rows[0].id);
 
   // Session B: EXPIRED (lecturer2) - end_time in the past, still ACTIVE in DB
   const sessB = await pool.query(
     `INSERT INTO attendance_sessions
-       (course_offering_id, started_by_lecturer_id, attendance_network_id,
-        location_id, start_time, end_time, late_threshold, status)
-     VALUES ($1, $2, $3, $4, now() - interval '3 hours', now() - interval '2 hours',
+       (course_offering_id, started_by_lecturer_id, start_time, end_time, late_threshold, status)
+     VALUES ($1, $2, now() - interval '3 hours', now() - interval '2 hours',
              '10 minutes', 'ACTIVE')
      RETURNING id`,
-    [offering3Id, lecturer2ProfileId, network2Id, location1Id]
+    [offering3Id, lecturer2ProfileId]
   );
   sessionExpiredId = Number(sessB.rows[0].id);
 
   // Session C: ENDED (lecturer1)
   const sessC = await pool.query(
     `INSERT INTO attendance_sessions
-       (course_offering_id, started_by_lecturer_id, attendance_network_id,
-        location_id, start_time, end_time, late_threshold, status, ended_at)
-     VALUES ($1, $2, $3, $4, now() - interval '5 hours', now() - interval '4 hours',
+       (course_offering_id, started_by_lecturer_id, start_time, end_time, late_threshold, status, ended_at)
+     VALUES ($1, $2, now() - interval '5 hours', now() - interval '4 hours',
              '0', 'ENDED', now() - interval '4 hours')
      RETURNING id`,
-    [offering2Id, lecturer1ProfileId, network1Id, location2Id]
+    [offering2Id, lecturer1ProfileId]
   );
   sessionEndedId = Number(sessC.rows[0].id);
 
   // Session D: ENDED (lecturer2) - older for ordering tests
   const sessD = await pool.query(
     `INSERT INTO attendance_sessions
-       (course_offering_id, started_by_lecturer_id, attendance_network_id,
-        location_id, start_time, end_time, late_threshold, status, ended_at)
-     VALUES ($1, $2, $3, $4, now() - interval '1 day', now() - interval '1 day' + interval '1 hour',
+       (course_offering_id, started_by_lecturer_id, start_time, end_time, late_threshold, status, ended_at)
+     VALUES ($1, $2, now() - interval '1 day', now() - interval '1 day' + interval '1 hour',
              '15 minutes', 'ENDED', now() - interval '1 day' + interval '1 hour')
      RETURNING id`,
-    [offering3Id, lecturer2ProfileId, network2Id, location2Id]
+    [offering3Id, lecturer2ProfileId]
   );
   sessionEnded2Id = Number(sessD.rows[0].id);
 
@@ -453,11 +420,8 @@ test("admin can retrieve a session by ID with full joined data", async () => {
   assert.equal(d.lecturerId, lecturer1ProfileId);
   assert.equal(d.lecturerStaffId, LECTURER1_STAFF_ID);
   assert.equal(d.lecturerName, "ADMSessTest Lecturer1");
-  assert.equal(d.attendanceNetworkId, network1Id);
-  assert.equal(d.attendanceNetworkCode, "ADMSessTest-NET1");
-  assert.equal(d.attendanceNetworkName, "ADMSessTest Network One");
-  assert.equal(d.locationId, location1Id);
-  assert.equal(d.locationName, "ADMSessTest-LOC1");
+  assert.equal("attendanceNetworkId" in d, false);
+  assert.equal("locationId" in d, false);
   assert.equal(d.academicSessionId, acadSession1Id);
   assert.equal(d.academicSessionName, "ADMSessTest-ACAD1");
   assert.equal(d.semesterId, firstSemesterId);
@@ -524,43 +488,8 @@ test("filtering by lecturerId returns only matching sessions", async () => {
 });
 
 // ---------------------------------------------------------------------------
-// 9. Filtering by network
 // ---------------------------------------------------------------------------
-
-test("filtering by attendanceNetworkId returns only matching sessions", async () => {
-  const token = await adminToken();
-  const res = await get(
-    `/api/admin/attendance-sessions?attendanceNetworkId=${network2Id}`,
-    cookieHeader(token)
-  );
-  assert.equal(res.status, 200);
-  const body = (await res.json()) as { data: Array<Record<string, unknown>> };
-  assert.ok(body.data.length >= 1);
-  assert.ok(body.data.every((s) => s.attendanceNetworkId === network2Id));
-  assert.ok(body.data.some((s) => s.id === sessionExpiredId));
-  assert.ok(body.data.some((s) => s.id === sessionEnded2Id));
-});
-
-// ---------------------------------------------------------------------------
-// 10. Filtering by location
-// ---------------------------------------------------------------------------
-
-test("filtering by locationId returns only matching sessions", async () => {
-  const token = await adminToken();
-  const res = await get(
-    `/api/admin/attendance-sessions?locationId=${location2Id}`,
-    cookieHeader(token)
-  );
-  assert.equal(res.status, 200);
-  const body = (await res.json()) as { data: Array<Record<string, unknown>> };
-  assert.ok(body.data.length >= 1);
-  assert.ok(body.data.every((s) => s.locationId === location2Id));
-  assert.ok(body.data.some((s) => s.id === sessionEndedId));
-  assert.ok(body.data.some((s) => s.id === sessionEnded2Id));
-});
-
-// ---------------------------------------------------------------------------
-// 11. Filtering by academic session
+// 9. Filtering by academic session
 // ---------------------------------------------------------------------------
 
 test("filtering by academicSessionId returns only matching sessions", async () => {
@@ -668,8 +597,6 @@ test("invalid ID filters are rejected with 400", async () => {
     "courseOfferingId=-5",
     "courseOfferingId=abc",
     "lecturerId=0",
-    "attendanceNetworkId=-1",
-    "locationId=not-a-number",
     "academicSessionId=1.5",
   ];
   for (const q of badFilters) {

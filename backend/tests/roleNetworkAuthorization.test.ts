@@ -9,26 +9,30 @@ import { hashPassword } from "../src/lib/passwords";
 import { boundDeviceHeaders } from "./studentSessionTestHelpers";
 
 /**
- * Role authorization for the attendance network / location configuration and
- * for the portals that must stay reachable from an ordinary internet connection.
+ * The student-only deployment policy must never turn into a role restriction.
  *
- * The K12 attendance router restriction is a STUDENT-only rule. This suite pins
- * the two halves of that rule that are enforceable today:
+ * Students are served by the K12 edge alone (STUDENT_ACCESS_MODE, see
+ * config/access.ts). That policy keys on the deployment, never on the caller's
+ * role or address, so this suite pins the two halves that could plausibly leak:
  *
- *   1. Attendance networks and attendance locations are configuration. Only
- *      ADMIN may list, create, update, activate or deactivate them. LECTURER
- *      and STUDENT are refused with 403.
- *   2. LECTURER and ADMIN are never gated by the student network restriction.
- *      The test server binds to loopback, so every request here arrives from
- *      127.0.0.1 - a connection that is provably not the attendance router
- *      network - and the lecturer and admin portals must still answer normally.
+ *   1. LECTURER and ADMIN reach their own portals from an ordinary internet
+ *      connection. The test server binds to loopback and every request here
+ *      arrives from 127.0.0.1, which is not the campus network, and both roles
+ *      must still be served normally.
+ *   2. The policy does not become a substitute for role checks. A lecturer still
+ *      cannot read the student API and a student still cannot read the lecturer
+ *      API, with the same FORBIDDEN the app returned before the policy existed.
  *
- * NOT covered here: the STUDENT-side network gate itself. The
- * `attendance_networks` table currently stores only `network_code`, `name` and
- * `status` - it has no address, subnet or SSID column - and no request-level
- * IP check exists yet. The K12 router address is still to be supplied, and it
- * must not be guessed, so no student network assertion is written yet. Those
- * tests belong here once the router details land.
+ * Cloud-mode behaviour (students refused, staff served) is asserted in
+ * studentAccessPolicy.test.ts, which mounts the app in both modes. This file runs
+ * as the edge, because it needs a real student session to make the second half
+ * meaningful.
+ *
+ * The suite previously covered admin CRUD for attendance networks and locations.
+ * Those endpoints and their tables are gone (migrations 017 and 018): a session no
+ * longer records a network or a location, so there was nothing left for an admin to
+ * configure. Role separation is now pinned against the configuration endpoints that
+ * remain - courses and students - which is the same authorization path.
  */
 
 const TEST_PASSWORD = "role-network-authorization-test-password";
@@ -98,10 +102,6 @@ function assertErrorCode(body: unknown, code: string): void {
 }
 
 async function cleanupScopedData(): Promise<void> {
-  await pool.query(`DELETE FROM locations WHERE name LIKE 'NETAUTH%'`);
-  await pool.query(
-    `DELETE FROM attendance_networks WHERE network_code LIKE 'NETAUTH%'`
-  );
   await pool.query(`DELETE FROM sessions WHERE user_id = ANY($1::BIGINT[])`, [
     userIds(),
   ]);
@@ -114,6 +114,7 @@ async function cleanupScopedData(): Promise<void> {
   await pool.query(`DELETE FROM users WHERE id = ANY($1::BIGINT[])`, [
     userIds(),
   ]);
+  await pool.query(`DELETE FROM courses WHERE course_code LIKE 'NETAUTH%'`);
   await pool.query(`DELETE FROM departments WHERE code LIKE 'NETAUTH%'`);
   await pool.query(`DELETE FROM faculties WHERE code LIKE 'NETAUTH%'`);
 }
@@ -142,9 +143,7 @@ before(async () => {
   );
   const departmentId = Number(department.rows[0].id);
 
-  const level = await pool.query(
-    `SELECT id FROM levels WHERE name = 100`
-  );
+  const level = await pool.query(`SELECT id FROM levels WHERE name = 100`);
   const levelId = Number(level.rows[0].id);
 
   const student = await pool.query(
@@ -173,6 +172,10 @@ before(async () => {
     [lecturerUserId, LECTURER_STAFF_ID, departmentId]
   );
 
+  // This file's suites run against the K12 edge (the test runner sets
+  // STUDENT_ACCESS_MODE=edge), the only deployment that serves students, so role
+  // routing is what refuses the lecturer here. Cloud-mode behaviour is asserted in
+  // studentAccessPolicy.test.ts.
   server = app.listen(0);
   await new Promise<void>((resolve) => server.once("listening", () => resolve()));
   const address = server.address() as AddressInfo;
@@ -225,269 +228,147 @@ async function adminToken(): Promise<string> {
 }
 
 // ---------------------------------------------------------------------------
-// Students may not configure networks or locations
+// Students and lecturers may not administer configuration
 // ---------------------------------------------------------------------------
 
-test("a student cannot list attendance networks", async () => {
+test("a student cannot list or create courses", async () => {
   const token = await studentToken();
-  const res = await get("/api/admin/attendance-networks", cookieHeader(token));
-  assert.equal(res.status, 403);
-  assertErrorCode(await res.json(), "FORBIDDEN");
-});
 
-test("a student cannot create an attendance network", async () => {
-  const token = await studentToken();
-  const res = await postJson(
-    "/api/admin/attendance-networks",
-    { networkCode: "NETAUTH-S1", name: "Student Attempt" },
+  const list = await get("/api/admin/courses", cookieHeader(token));
+  assert.equal(list.status, 403);
+  assertErrorCode(await list.json(), "FORBIDDEN");
+
+  const create = await postJson(
+    "/api/admin/courses",
+    { courseCode: "NETAUTH-S1", title: "Student Attempt" },
     cookieHeader(token)
   );
-  assert.equal(res.status, 403);
-  assertErrorCode(await res.json(), "FORBIDDEN");
+  assert.equal(create.status, 403);
+  assertErrorCode(await create.json(), "FORBIDDEN");
 });
 
-test("a student cannot update or deactivate an attendance network", async () => {
+test("a student cannot list or create locations, because the endpoints are gone", async () => {
+  // The attendance location API and its table were removed with the rest of the
+  // network/location metadata (migrations 017 and 018). The route must not reappear
+  // in any form, so this asserts a 404 rather than a 403.
+  const token = await studentToken();
+  const res = await get("/api/admin/locations", cookieHeader(token));
+  assert.equal(res.status, 404);
+
+  const networks = await get("/api/admin/attendance-networks", cookieHeader(token));
+  assert.equal(networks.status, 404);
+});
+
+test("a lecturer cannot list or create courses", async () => {
+  const token = await lecturerToken();
+
+  const list = await get("/api/admin/courses", cookieHeader(token));
+  assert.equal(list.status, 403);
+  assertErrorCode(await list.json(), "FORBIDDEN");
+
+  const create = await postJson(
+    "/api/admin/courses",
+    { courseCode: "NETAUTH-L1", title: "Lecturer Attempt" },
+    cookieHeader(token)
+  );
+  assert.equal(create.status, 403);
+  assertErrorCode(await create.json(), "FORBIDDEN");
+});
+
+test("a rejected non-admin request must not mutate the configuration", async () => {
   const admin = await adminToken();
   const created = await postJson(
-    "/api/admin/attendance-networks",
-    { networkCode: "NETAUTH-S2", name: "Student Target" },
+    "/api/admin/courses",
+    { courseCode: "NETAUTH-C1", title: "Admin Course" },
     cookieHeader(admin)
   );
   assert.equal(created.status, 201);
-  const { data: network } = (await created.json()) as { data: { id: number } };
+  const { data: course } = (await created.json()) as { data: { id: number } };
 
-  const token = await studentToken();
+  const token = await lecturerToken();
   const res = await patchJson(
-    `/api/admin/attendance-networks/${network.id}`,
-    { status: "INACTIVE" },
+    `/api/admin/courses/${course.id}`,
+    { title: "Lecturer Rename Attempt" },
     cookieHeader(token)
   );
   assert.equal(res.status, 403);
   assertErrorCode(await res.json(), "FORBIDDEN");
 
-  const unchanged = await get("/api/admin/attendance-networks", cookieHeader(admin));
-  const list = (await unchanged.json()) as { data: Array<{ id: number; status: string }> };
+  const unchanged = await get("/api/admin/courses", cookieHeader(admin));
+  const list = (await unchanged.json()) as { data: Array<{ id: number; title: string }> };
   assert.equal(
-    list.data.find((n) => n.id === network.id)?.status,
-    "ACTIVE",
-    "a rejected student request must not mutate the network"
+    list.data.find((c) => c.id === course.id)?.title,
+    "Admin Course",
+    "a rejected lecturer request must not mutate the course"
   );
-});
-
-test("a student cannot manage attendance locations", async () => {
-  const token = await studentToken();
-
-  const list = await get("/api/admin/locations", cookieHeader(token));
-  assert.equal(list.status, 403);
-  assertErrorCode(await list.json(), "FORBIDDEN");
-
-  const create = await postJson(
-    "/api/admin/locations",
-    { name: "NETAUTH-Student Attempt" },
-    cookieHeader(token)
-  );
-  assert.equal(create.status, 403);
-  assertErrorCode(await create.json(), "FORBIDDEN");
 });
 
 // ---------------------------------------------------------------------------
-// Lecturers may not configure networks or locations
+// Only ADMIN administers the configuration
 // ---------------------------------------------------------------------------
 
-test("a lecturer cannot list or create attendance networks", async () => {
-  const token = await lecturerToken();
-
-  const list = await get("/api/admin/attendance-networks", cookieHeader(token));
-  assert.equal(list.status, 403);
-  assertErrorCode(await list.json(), "FORBIDDEN");
-
-  const create = await postJson(
-    "/api/admin/attendance-networks",
-    { networkCode: "NETAUTH-L1", name: "Lecturer Attempt" },
-    cookieHeader(token)
-  );
-  assert.equal(create.status, 403);
-  assertErrorCode(await create.json(), "FORBIDDEN");
-});
-
-test("a lecturer cannot update, deactivate or reactivate an attendance network", async () => {
-  const admin = await adminToken();
-  const created = await postJson(
-    "/api/admin/attendance-networks",
-    { networkCode: "NETAUTH-L2", name: "Lecturer Target" },
-    cookieHeader(admin)
-  );
-  assert.equal(created.status, 201);
-  const { data: network } = (await created.json()) as { data: { id: number } };
-
-  const token = await lecturerToken();
-  const deactivate = await patchJson(
-    `/api/admin/attendance-networks/${network.id}`,
-    { status: "INACTIVE" },
-    cookieHeader(token)
-  );
-  assert.equal(deactivate.status, 403);
-  assertErrorCode(await deactivate.json(), "FORBIDDEN");
-
-  const reactivate = await patchJson(
-    `/api/admin/attendance-networks/${network.id}`,
-    { status: "ACTIVE" },
-    cookieHeader(token)
-  );
-  assert.equal(reactivate.status, 403);
-  assertErrorCode(await reactivate.json(), "FORBIDDEN");
-
-  const listed = await get("/api/admin/attendance-networks", cookieHeader(admin));
-  const list = (await listed.json()) as { data: Array<{ id: number; status: string }> };
-  assert.equal(
-    list.data.find((n) => n.id === network.id)?.status,
-    "ACTIVE",
-    "a rejected lecturer request must not mutate the network"
-  );
-});
-
-test("a lecturer cannot manage attendance locations", async () => {
-  const token = await lecturerToken();
-
-  const list = await get("/api/admin/locations", cookieHeader(token));
-  assert.equal(list.status, 403);
-  assertErrorCode(await list.json(), "FORBIDDEN");
-
-  const create = await postJson(
-    "/api/admin/locations",
-    { name: "NETAUTH-Lecturer Attempt" },
-    cookieHeader(token)
-  );
-  assert.equal(create.status, 403);
-  assertErrorCode(await create.json(), "FORBIDDEN");
-});
-
-// ---------------------------------------------------------------------------
-// Only ADMIN manages the configuration
-// ---------------------------------------------------------------------------
-
-test("an admin can create, rename, deactivate and reactivate an attendance network", async () => {
+test("an admin can create and rename a course", async () => {
   const token = await adminToken();
 
   const created = await postJson(
-    "/api/admin/attendance-networks",
-    { networkCode: "NETAUTH-A1", name: "Admin Network" },
+    "/api/admin/courses",
+    { courseCode: "NETAUTH-A1", title: "Admin Course" },
     cookieHeader(token)
   );
   assert.equal(created.status, 201);
   const createdBody = (await created.json()) as { data: Record<string, unknown> };
-  assert.equal(createdBody.data.networkCode, "NETAUTH-A1");
-  assert.equal(createdBody.data.status, "ACTIVE");
-  const networkId = createdBody.data.id as number;
+  assert.equal(createdBody.data.courseCode, "NETAUTH-A1");
+  const courseId = createdBody.data.id as number;
 
   const renamed = await patchJson(
-    `/api/admin/attendance-networks/${networkId}`,
-    { name: "Admin Network Renamed" },
+    `/api/admin/courses/${courseId}`,
+    { title: "Admin Course Renamed" },
     cookieHeader(token)
   );
   assert.equal(renamed.status, 200);
-  assert.equal((await renamed.json()).data.name, "Admin Network Renamed");
-
-  const deactivated = await patchJson(
-    `/api/admin/attendance-networks/${networkId}`,
-    { status: "INACTIVE" },
-    cookieHeader(token)
-  );
-  assert.equal(deactivated.status, 200);
-  assert.equal((await deactivated.json()).data.status, "INACTIVE");
-
-  const reactivated = await patchJson(
-    `/api/admin/attendance-networks/${networkId}`,
-    { status: "ACTIVE" },
-    cookieHeader(token)
-  );
-  assert.equal(reactivated.status, 200);
-  assert.equal((await reactivated.json()).data.status, "ACTIVE");
-});
-
-test("an admin can create, rename, deactivate and reactivate an attendance location", async () => {
-  const token = await adminToken();
-
-  const created = await postJson(
-    "/api/admin/locations",
-    { name: "NETAUTH-Admin Location", description: "Block A" },
-    cookieHeader(token)
-  );
-  assert.equal(created.status, 201);
-  const createdBody = (await created.json()) as { data: Record<string, unknown> };
-  assert.equal(createdBody.data.status, "ACTIVE");
-  const locationId = createdBody.data.id as number;
-
-  const renamed = await patchJson(
-    `/api/admin/locations/${locationId}`,
-    { name: "NETAUTH-Admin Location Renamed" },
-    cookieHeader(token)
-  );
-  assert.equal(renamed.status, 200);
-  assert.equal(
-    (await renamed.json()).data.name,
-    "NETAUTH-Admin Location Renamed"
-  );
-
-  const deactivated = await patchJson(
-    `/api/admin/locations/${locationId}`,
-    { status: "INACTIVE" },
-    cookieHeader(token)
-  );
-  assert.equal(deactivated.status, 200);
-  assert.equal((await deactivated.json()).data.status, "INACTIVE");
-
-  const reactivated = await patchJson(
-    `/api/admin/locations/${locationId}`,
-    { status: "ACTIVE" },
-    cookieHeader(token)
-  );
-  assert.equal(reactivated.status, 200);
-  assert.equal((await reactivated.json()).data.status, "ACTIVE");
+  assert.equal((await renamed.json()).data.title, "Admin Course Renamed");
 });
 
 // ---------------------------------------------------------------------------
-// The student network restriction must never reach LECTURER or ADMIN
+// The student-only deployment policy must never reach LECTURER or ADMIN
 // ---------------------------------------------------------------------------
 
 test("a lecturer reaches the lecturer portal over a non-campus connection", async () => {
-  // Requests arrive from 127.0.0.1, which is not the attendance router
-  // network. The student network restriction must not apply here.
+  // Requests arrive from 127.0.0.1, which is not the campus network. The
+  // student-only policy must not apply here.
   const token = await lecturerToken();
 
-  const networks = await get("/api/lecturer/attendance-networks", cookieHeader(token));
-  assert.equal(networks.status, 200, "lecturer must not be blocked by the student network rule");
-  assert.ok(Array.isArray((await networks.json()).data));
-
-  const locations = await get("/api/lecturer/locations", cookieHeader(token));
-  assert.equal(locations.status, 200, "lecturer must not be blocked by the student network rule");
-  assert.ok(Array.isArray((await locations.json()).data));
-
   const offerings = await get("/api/lecturer/course-offerings", cookieHeader(token));
-  assert.equal(offerings.status, 200, "lecturer must not be blocked by the student network rule");
+  assert.equal(offering.status, 200, "lecturer must not be blocked by the student policy");
+  assert.ok(Array.isArray((await offerings.json()).data));
+
+  const sessions = await get("/api/lecturer/attendance-sessions", cookieHeader(token));
+  assert.equal(sessions.status, 200, "lecturer must not be blocked by the student policy");
 });
 
 test("an admin reaches the admin portal over a non-campus connection", async () => {
   const token = await adminToken();
 
-  const networks = await get("/api/admin/attendance-networks", cookieHeader(token));
-  assert.equal(networks.status, 200, "admin must not be blocked by the student network rule");
+  const courses = await get("/api/admin/courses", cookieHeader(token));
+  assert.equal(courses.status, 200, "admin must not be blocked by the student policy");
 
-  const locations = await get("/api/admin/locations", cookieHeader(token));
-  assert.equal(locations.status, 200, "admin must not be blocked by the student network rule");
+  const students = await get("/api/admin/students", cookieHeader(token));
+  assert.equal(students.status, 200, "admin must not be blocked by the student policy");
 });
 
-test("the student network restriction does not leak into role routing", async () => {
+test("the student policy does not leak into role routing", async () => {
   // A lecturer must not be able to reach a student-only route, and a student
   // must not be able to reach a lecturer-only route. The restriction under
-  // test is role-based, not network-based.
+  // test is role-based, not deployment-based.
   const lecturer = await lecturerToken();
   const studentRoutes = await get("/api/student/attendance/eligible", cookieHeader(lecturer));
   assert.equal(studentRoutes.status, 403);
+  // Role routing, not deployment routing: on the edge the role check is what
+  // refuses the lecturer, exactly as before.
   assertErrorCode(await studentRoutes.json(), "FORBIDDEN");
 
   const student = await studentToken();
-  const lecturerRoutes = await get("/api/lecturer/attendance-networks", cookieHeader(student));
+  const lecturerRoutes = await get("/api/lecturer/course-offerings", cookieHeader(student));
   assert.equal(lecturerRoutes.status, 403);
   assertErrorCode(await lecturerRoutes.json(), "FORBIDDEN");
 });

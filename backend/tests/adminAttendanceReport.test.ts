@@ -55,8 +55,6 @@ let offeringBId = 0;
 let offeringCId = 0;
 let offeringDId = 0;
 
-let network1Id = 0;
-let location1Id = 0;
 
 let sessionA1 = 0; // ENDED  (offering A)
 let sessionA2 = 0; // ENDED  (offering A)
@@ -153,8 +151,6 @@ async function cleanupScopedData(): Promise<void> {
   await pool.query(`DELETE FROM students WHERE user_id = ANY($1::BIGINT[])`, [userIds()]);
   await pool.query(`DELETE FROM lecturers WHERE user_id = ANY($1::BIGINT[])`, [userIds()]);
   await pool.query(`DELETE FROM users WHERE id = ANY($1::BIGINT[])`, [userIds()]);
-  await pool.query(`DELETE FROM attendance_networks WHERE network_code LIKE 'ADMRepTest%'`);
-  await pool.query(`DELETE FROM locations WHERE name LIKE 'ADMRepTest%'`);
   await pool.query(`DELETE FROM departments WHERE code LIKE 'ADMRepTest%'`);
   await pool.query(`DELETE FROM faculties WHERE code LIKE 'ADMRepTest%'`);
 }
@@ -205,15 +201,14 @@ async function insertSession(
   endedAtOffsetMinutes: number | null
 ): Promise<number> {
   const result = await pool.query(
-    `INSERT INTO attendance_sessions
-       (course_offering_id, started_by_lecturer_id, attendance_network_id,
-        location_id, start_time, end_time, late_threshold, status, ended_at)
-     VALUES ($1, $2, $3, $4,
-             now() + ($5 * interval '1 minute'), now() + ($6 * interval '1 minute'),
-             '5 minutes', $7,
-             CASE WHEN $8::bigint IS NULL THEN NULL ELSE now() + ($8 * interval '1 minute') END)
+     `INSERT INTO attendance_sessions
+       (course_offering_id, started_by_lecturer_id, start_time, end_time, late_threshold, status, ended_at)
+      VALUES ($1, $2,
+           now() + ($3 * interval '1 minute'), now() + ($4 * interval '1 minute'),
+           '5 minutes', $5,
+           CASE WHEN $6::bigint IS NULL THEN NULL ELSE now() + ($6 * interval '1 minute') END)
      RETURNING id`,
-    [offeringId, lecturerId, network1Id, location1Id, startOffsetMinutes, endOffsetMinutes, status, endedAtOffsetMinutes]
+    [offeringId, lecturerId, startOffsetMinutes, endOffsetMinutes, status, endedAtOffsetMinutes]
   );
   return Number(result.rows[0].id);
 }
@@ -310,17 +305,6 @@ before(async () => {
     [course2Id, acadSessionBId, secondSemesterId]
   );
   offeringDId = Number(offD.rows[0].id);
-
-  const net1 = await pool.query(
-    `INSERT INTO attendance_networks (network_code, name)
-     VALUES ('ADMRepTest-NET1', 'ADMRepTest Network One') RETURNING id`
-  );
-  network1Id = Number(net1.rows[0].id);
-
-  const loc1 = await pool.query(
-    `INSERT INTO locations (name) VALUES ('ADMRepTest-LOC1') RETURNING id`
-  );
-  location1Id = Number(loc1.rows[0].id);
 
   const lec1 = await insertLecturer(LECTURER_1_STAFF_ID, "ADMRepTest Lecturer One");
   lecturer1UserId = lec1.userId;

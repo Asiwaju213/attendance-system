@@ -19,8 +19,6 @@ test.afterAll(async () => {
 });
 
 const OFFERING_OPTION = /E2E-101/;
-const NETWORK_OPTION = /E2E-NET-001/;
-const LOCATION_OPTION = /E2E Test Lecture Hall/;
 
 async function loginAsLecturer(page: Page): Promise<void> {
   await page.goto("/staff/lecturer/login");
@@ -52,8 +50,6 @@ async function selectOptionByText(
 
 async function selectSessionOptions(page: Page): Promise<void> {
   await selectOptionByText(page.getByLabel("Course offering"), OFFERING_OPTION);
-  await selectOptionByText(page.getByLabel("Attendance network"), NETWORK_OPTION);
-  await selectOptionByText(page.getByLabel("Location"), LOCATION_OPTION);
 }
 
 async function endActiveSession(page: Page): Promise<void> {
@@ -190,14 +186,10 @@ test("an active session started elsewhere is surfaced with a clear error", async
   await selectSessionOptions(page);
 
   const offerings = await (await page.request.get("/api/lecturer/course-offerings")).json();
-  const networks = await (await page.request.get("/api/lecturer/attendance-networks")).json();
-  const locations = await (await page.request.get("/api/lecturer/locations")).json();
 
   const created = await page.request.post("/api/lecturer/attendance-sessions", {
     data: {
       courseOfferingId: offerings.data[0].id,
-      attendanceNetworkId: networks.data[0].id,
-      locationId: locations.data[0].id,
       durationMinutes: 60,
       lateThresholdMinutes: 5,
     },

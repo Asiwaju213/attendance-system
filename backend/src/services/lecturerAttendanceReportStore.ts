@@ -42,8 +42,6 @@ interface SessionDetailRow {
   start_time: Date;
   end_time: Date;
   lecturer_name: string;
-  location_name: string;
-  network_name: string;
   record_status: "PRESENT" | "LATE" | null;
   marked_at: Date | null;
 }
@@ -54,8 +52,6 @@ function toSessionDetail(row: SessionDetailRow): LecturerReportSessionDetail {
     startTime: row.start_time.toISOString(),
     endTime: row.end_time.toISOString(),
     lecturerName: row.lecturer_name,
-    locationName: row.location_name,
-    attendanceNetworkName: row.network_name,
     status: (row.record_status ?? "ABSENT") as LecturerReportAttendanceStatus,
     markedAt: row.marked_at ? row.marked_at.toISOString() : null,
   };
@@ -167,13 +163,9 @@ export async function getLecturerCourseOfferingReport(
             s.start_time,
             s.end_time,
             lecu.name AS lecturer_name,
-            loc.name AS location_name,
-            net.name AS network_name,
             ar.status AS record_status,
             ar.marked_at
      FROM attendance_sessions s
-     JOIN locations loc ON loc.id = s.location_id
-     JOIN attendance_networks net ON net.id = s.attendance_network_id
      JOIN lecturers lec ON lec.id = s.started_by_lecturer_id
      JOIN users lecu ON lecu.id = lec.user_id
      JOIN course_registrations cr
@@ -286,8 +278,6 @@ export async function getLecturerSessionAttendanceReport(
             a.name AS academic_session_name,
             sem.name AS semester_name,
             lv.name AS level_name,
-            net.name AS network_name,
-            loc.name AS location_name,
             lecu.name AS started_by_lecturer_name,
             lec.staff_id AS started_by_staff_id,
             (col.id IS NOT NULL) AS is_assigned
@@ -297,8 +287,6 @@ export async function getLecturerSessionAttendanceReport(
      JOIN academic_sessions a ON a.id = o.academic_session_id
      JOIN semesters sem ON sem.id = o.semester_id
      JOIN levels lv ON lv.id = c.level_id
-     JOIN attendance_networks net ON net.id = s.attendance_network_id
-     JOIN locations loc ON loc.id = s.location_id
      JOIN lecturers lec ON lec.id = s.started_by_lecturer_id
      JOIN users lecu ON lecu.id = lec.user_id
      LEFT JOIN course_offering_lecturers col
@@ -343,8 +331,6 @@ export async function getLecturerSessionAttendanceReport(
       academicSession: sessionRow.academic_session_name,
       semester: sessionRow.semester_name,
       level: Number(sessionRow.level_name),
-      attendanceNetworkName: sessionRow.network_name,
-      locationName: sessionRow.location_name,
       startTime: sessionRow.start_time.toISOString(),
       endTime: sessionRow.end_time.toISOString(),
       lateThresholdMinutes: Number(sessionRow.late_threshold_minutes),
@@ -384,8 +370,6 @@ interface SessionContextRow {
   academic_session_name: string;
   semester_name: string;
   level_name: number;
-  network_name: string;
-  location_name: string;
   started_by_lecturer_name: string;
   started_by_staff_id: string;
 }

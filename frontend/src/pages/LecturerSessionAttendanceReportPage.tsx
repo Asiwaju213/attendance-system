@@ -246,14 +246,6 @@ export function LecturerSessionAttendanceReportPage() {
                 {session.startedByLecturer.staffId})
               </p>
               <p>
-                <span className="app-detail__label">Attendance network: </span>
-                {session.attendanceNetworkName}
-              </p>
-              <p>
-                <span className="app-detail__label">Location: </span>
-                {session.locationName}
-              </p>
-              <p>
                 <span className="app-detail__label">Started: </span>
                 {formatDateTime(session.startTime)}
               </p>

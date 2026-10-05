@@ -328,8 +328,6 @@ test("report API response includes all required fields", async ({
         academicSession: string;
         semester: string;
         level: number;
-        attendanceNetworkName: string;
-        locationName: string;
         startTime: string;
         endTime: string;
         lateThresholdMinutes: number;

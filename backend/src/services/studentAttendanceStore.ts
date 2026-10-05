@@ -17,8 +17,6 @@ interface EligibleSessionRow {
   start_time: Date;
   end_time: Date;
   late_threshold_minutes: number;
-  network_name: string;
-  location_name: string;
   attendance_status: "PRESENT" | "LATE" | null;
 }
 
@@ -31,8 +29,6 @@ function toEligibleSession(row: EligibleSessionRow): EligibleAttendanceSession {
     startTime: row.start_time.toISOString(),
     endTime: row.end_time.toISOString(),
     lateThresholdMinutes: row.late_threshold_minutes,
-    attendanceNetworkName: row.network_name,
-    locationName: row.location_name,
     currentAttendanceState: row.attendance_status ?? "NOT_MARKED",
   };
 }
@@ -55,13 +51,10 @@ export async function getEligibleAttendanceSessions(
             c.course_code, c.title AS course_title,
             s.start_time, s.end_time,
             (EXTRACT(EPOCH FROM s.late_threshold) / 60)::int AS late_threshold_minutes,
-            n.name AS network_name, l.name AS location_name,
             ar.status AS attendance_status
      FROM attendance_sessions s
      JOIN course_offerings o ON o.id = s.course_offering_id
      JOIN courses c ON c.id = o.course_id
-     JOIN attendance_networks n ON n.id = s.attendance_network_id
-     JOIN locations l ON l.id = s.location_id
      JOIN course_registrations cr
        ON cr.course_offering_id = o.id
       AND cr.student_id = $1

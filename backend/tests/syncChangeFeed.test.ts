@@ -39,8 +39,6 @@ async function get(path: string, headers: Record<string, string> = {}) {
 function validCreateBody(): Record<string, unknown> {
   return {
     courseOfferingId: fixture.courseOfferingId,
-    attendanceNetworkId: fixture.attendanceNetworkId,
-    locationId: fixture.locationId,
     durationMinutes: 60,
     lateThresholdMinutes: 5,
   };
@@ -131,6 +129,8 @@ test("starting an attendance session creates a CREATED sync event", async () => 
   assert.equal(payload.endedAt, null);
   assert.ok(payload.courseCode.startsWith("SYNCFEED-CRS-"));
   assert.ok(Number.isFinite(payload.cloudLecturerId));
+  assert.equal("attendanceNetworkId" in payload, false);
+  assert.equal("locationId" in payload, false);
 });
 
 test("closing an attendance session creates a CLOSED sync event", async () => {

@@ -29,8 +29,6 @@ function eligibleSession(overrides: Record<string, unknown> = {}) {
     startTime: new Date(Date.now() - 30 * 60 * 1000).toISOString(),
     endTime: new Date(Date.now() + 30 * 60 * 1000).toISOString(),
     lateThresholdMinutes: 5,
-    attendanceNetworkName: "E2E Test Network",
-    locationName: "E2E Test Lecture Hall",
     currentAttendanceState: "NOT_MARKED",
     ...overrides,
   };

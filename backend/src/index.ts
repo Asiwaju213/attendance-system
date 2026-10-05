@@ -2,6 +2,7 @@
 // Only after that is `.env` loaded does `config/server` read HOST and PORT below.
 import type { Server } from "node:http";
 import { app } from "./app";
+import { describeStudentAccessConfig, studentAccessConfig } from "./config/access";
 import {
   describeServerConfig,
   isLoopbackHost,
@@ -14,6 +15,9 @@ const { host, port } = serverConfig;
 
 const server: Server = app.listen(port, host, () => {
   console.log(describeServerConfig(serverConfig));
+  // Which deployment this process is, and therefore whether it serves students. Logged next to
+  // the bind address because "students cannot sign in" is otherwise a puzzling symptom.
+  console.log(describeStudentAccessConfig(studentAccessConfig));
   if (isLoopbackHost(host)) {
     console.log(
       "Set HOST=0.0.0.0 in backend/.env to make the API reachable from the local network."

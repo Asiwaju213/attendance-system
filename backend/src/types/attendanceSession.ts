@@ -11,10 +11,6 @@ export interface AttendanceSession {
   courseOfferingId: number;
   courseCode: string;
   courseTitle: string;
-  attendanceNetworkId: number;
-  attendanceNetworkName: string;
-  locationId: number;
-  locationName: string;
   startTime: string;
   endTime: string;
   lateThresholdMinutes: number;
@@ -27,7 +23,6 @@ export interface AdminAttendanceSession extends AttendanceSession {
   lecturerId: number;
   lecturerStaffId: string;
   lecturerName: string;
-  attendanceNetworkCode: string;
   academicSessionId: number;
   academicSessionName: string;
   semesterId: number;
@@ -47,8 +42,6 @@ export interface EligibleAttendanceSession {
   startTime: string;
   endTime: string;
   lateThresholdMinutes: number;
-  attendanceNetworkName: string;
-  locationName: string;
   currentAttendanceState: AttendanceState;
 }
 

@@ -186,8 +186,6 @@ export function buildLecturerSemesterAttendanceWorkbook(
     "Session End",
     "Status",
     "Marked At",
-    "Location",
-    "Attendance Network",
   ]);
 
   let detailsRow = DETAILS_HEADER_ROW + 1;
@@ -203,8 +201,6 @@ export function buildLecturerSemesterAttendanceWorkbook(
       writeDateTimeCell(details, detailsRow, 5, session.endTime);
       row.getCell(6).value = session.status;
       writeDateTimeCell(details, detailsRow, 7, session.markedAt);
-      row.getCell(8).value = session.locationName;
-      row.getCell(9).value = session.attendanceNetworkName;
       detailsRow += 1;
     }
   }
@@ -242,12 +238,10 @@ export function buildLecturerSessionAttendanceWorkbook(
     "Lecturer",
     `${session.startedByLecturer.name} (${session.startedByLecturer.staffId})`
   );
-  writeTitleRow(sheet, 7, "Attendance Network", session.attendanceNetworkName);
-  writeTitleRow(sheet, 8, "Location", session.locationName);
-  writeTitleDateRow(sheet, 9, "Session Start", session.startTime);
-  writeTitleDateRow(sheet, 10, "Session End", session.endTime);
-  writeTitleRow(sheet, 11, "Late Threshold (Minutes)", session.lateThresholdMinutes);
-  writeTitleDateRow(sheet, 12, "Ended At", session.endedAt);
+  writeTitleDateRow(sheet, 7, "Session Start", session.startTime);
+  writeTitleDateRow(sheet, 8, "Session End", session.endTime);
+  writeTitleRow(sheet, 9, "Late Threshold (Minutes)", session.lateThresholdMinutes);
+  writeTitleDateRow(sheet, 10, "Ended At", session.endedAt);
 
   writeHeaderRow(sheet, SESSION_HEADER_ROW, [
     "Student Name",

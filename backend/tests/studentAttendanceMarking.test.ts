@@ -64,8 +64,6 @@ let offering3Id = 0;
 let offeringClosedId = 0;
 let offeringInactiveCourseId = 0;
 
-let network1Id = 0;
-let location1Id = 0;
 
 let presentSessionId = 0;
 let lateSessionId = 0;
@@ -203,19 +201,16 @@ async function insertSession(
   lateThresholdMinutes: number
 ): Promise<number> {
   const inserted = await pool.query(
-    `INSERT INTO attendance_sessions
-       (course_offering_id, started_by_lecturer_id, attendance_network_id,
-        location_id, start_time, end_time, late_threshold, status, ended_at)
-     VALUES ($1, $2, $3, $4, now() + ($5 * interval '1 minute'),
-             now() + ($6 * interval '1 minute'),
-             ($7 * interval '1 minute'), $8,
-             CASE WHEN $8 = 'ENDED' THEN now() + ($6 * interval '1 minute') END)
+        `INSERT INTO attendance_sessions
+           (course_offering_id, started_by_lecturer_id, start_time, end_time, late_threshold, status, ended_at)
+         VALUES ($1, $2, now() + ($3 * interval '1 minute'),
+           now() + ($4 * interval '1 minute'),
+           ($5 * interval '1 minute'), $6,
+           CASE WHEN $6 = 'ENDED' THEN now() + ($4 * interval '1 minute') END)
      RETURNING id`,
     [
       offeringId,
       lecturerProfileId,
-      network1Id,
-      location1Id,
       startOffsetMinutes,
       endOffsetMinutes,
       lateThresholdMinutes,
@@ -227,8 +222,21 @@ async function insertSession(
 
 async function cleanupScopedData(): Promise<void> {
   await pool.query(
-    `DELETE FROM attendance_records WHERE session_id = ANY($1::BIGINT[])`,
-    [SESSION_IDS()]
+    `DELETE FROM sync_outbound_attendance_marks
+     WHERE attendance_record_id IN (
+       SELECT ar.id
+       FROM attendance_records ar
+       JOIN attendance_sessions s ON s.id = ar.session_id
+       JOIN lecturers lec ON lec.id = s.started_by_lecturer_id
+       WHERE lec.staff_id LIKE 'MARK/LEC/%'
+     )`
+  );
+  await pool.query(
+    `DELETE FROM attendance_records ar
+     USING attendance_sessions s, lecturers lec
+     WHERE ar.session_id = s.id
+       AND s.started_by_lecturer_id = lec.id
+       AND lec.staff_id LIKE 'MARK/LEC/%'`
   );
   await pool.query(
     `DELETE FROM attendance_sessions
@@ -285,11 +293,16 @@ async function cleanupScopedData(): Promise<void> {
   );
   await pool.query(`DELETE FROM departments WHERE code LIKE 'MARK%'`);
   await pool.query(`DELETE FROM faculties WHERE code LIKE 'MARK%'`);
-  await pool.query(`DELETE FROM attendance_networks WHERE network_code LIKE 'MARK%'`);
-  await pool.query(`DELETE FROM locations WHERE name LIKE 'MARK-LOC%'`);
 }
 
 async function resetAttendanceRecords(): Promise<void> {
+  await pool.query(
+    `DELETE FROM sync_outbound_attendance_marks
+     WHERE attendance_record_id IN (
+       SELECT id FROM attendance_records WHERE session_id = ANY($1::BIGINT[])
+     )`,
+    [SESSION_IDS()]
+  );
   await pool.query(
     `DELETE FROM attendance_records WHERE session_id = ANY($1::BIGINT[])`,
     [SESSION_IDS()]
@@ -374,17 +387,6 @@ before(async () => {
   offering3Id = await insertOffering(course3Id, firstSemesterId);
   offeringClosedId = await insertOffering(course1Id, secondSemesterId, "CLOSED");
   offeringInactiveCourseId = await insertOffering(courseInactiveId, firstSemesterId);
-
-  const network1 = await pool.query(
-    `INSERT INTO attendance_networks (network_code, name)
-     VALUES ('MARK-NET1', 'Mark Network One') RETURNING id`
-  );
-  network1Id = Number(network1.rows[0].id);
-
-  const location1 = await pool.query(
-    `INSERT INTO locations (name) VALUES ('MARK-LOC1') RETURNING id`
-  );
-  location1Id = Number(location1.rows[0].id);
 
   async function insertUser(
     name: string,

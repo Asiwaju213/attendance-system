@@ -5,8 +5,6 @@ const MAX_LATE_THRESHOLD_MINUTES = 120;
 
 export interface CreateAttendanceSessionInput {
   courseOfferingId: number;
-  attendanceNetworkId: number;
-  locationId: number;
   durationMinutes: number;
   lateThresholdMinutes: number;
 }
@@ -60,16 +58,6 @@ export function parseCreateAttendanceSession(
     1,
     Number.MAX_SAFE_INTEGER
   );
-  const attendanceNetworkId = parseIntegerField(
-    obj.attendanceNetworkId,
-    1,
-    Number.MAX_SAFE_INTEGER
-  );
-  const locationId = parseIntegerField(
-    obj.locationId,
-    1,
-    Number.MAX_SAFE_INTEGER
-  );
   const durationMinutes = parseIntegerField(
     obj.durationMinutes,
     MIN_DURATION_MINUTES,
@@ -83,8 +71,6 @@ export function parseCreateAttendanceSession(
 
   if (
     courseOfferingId === null ||
-    attendanceNetworkId === null ||
-    locationId === null ||
     durationMinutes === null ||
     lateThresholdMinutes === null
   ) {
@@ -97,8 +83,6 @@ export function parseCreateAttendanceSession(
 
   return {
     courseOfferingId,
-    attendanceNetworkId,
-    locationId,
     durationMinutes,
     lateThresholdMinutes,
   };

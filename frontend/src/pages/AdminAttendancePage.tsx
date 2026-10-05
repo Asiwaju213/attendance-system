@@ -7,9 +7,7 @@ import {
   getAdminAttendanceSession,
   listAdminAttendanceRecords,
   listAdminAttendanceSessions,
-  listAdminAttendanceNetworks,
   listAdminCourseOfferings,
-  listAdminLocations,
   correctAttendanceRecord,
 } from "../api/attendance";
 import type {
@@ -17,8 +15,6 @@ import type {
   AdminAttendanceSession,
   AdminCourseOffering,
   AdminSessionFilters,
-  AttendanceLocation,
-  AttendanceNetwork,
   AttendanceRecordStatus,
   CorrectAttendanceRecordInput,
   SessionCurrentState,
@@ -27,15 +23,11 @@ import type {
 
 interface FilterCatalogs {
   offerings: AdminCourseOffering[];
-  networks: AttendanceNetwork[];
-  locations: AttendanceLocation[];
 }
 
 interface DraftFilters {
   courseOfferingId: string;
   lecturerId: string;
-  attendanceNetworkId: string;
-  locationId: string;
   academicSessionId: string;
   semesterId: string;
   status: "" | SessionStatus;
@@ -57,8 +49,6 @@ function emptyDraft(): DraftFilters {
   return {
     courseOfferingId: "",
     lecturerId: "",
-    attendanceNetworkId: "",
-    locationId: "",
     academicSessionId: "",
     semesterId: "",
     status: "",
@@ -122,16 +112,6 @@ function parseDraftFilters(draft: DraftFilters): ParseResult {
   const lecturerId = positiveId(draft.lecturerId);
   if (lecturerId !== null) {
     filters.lecturerId = lecturerId;
-  }
-
-  const networkId = positiveId(draft.attendanceNetworkId);
-  if (networkId !== null) {
-    filters.attendanceNetworkId = networkId;
-  }
-
-  const locationId = positiveId(draft.locationId);
-  if (locationId !== null) {
-    filters.locationId = locationId;
   }
 
   const academicSessionId = positiveId(draft.academicSessionId);
@@ -214,19 +194,13 @@ export function AdminAttendancePage() {
 
   useEffect(() => {
     let cancelled = false;
-    Promise.all([
-      listAdminCourseOfferings(),
-      listAdminAttendanceNetworks(),
-      listAdminLocations(),
-    ])
-      .then(([offeringsRes, networksRes, locationsRes]) => {
+    listAdminCourseOfferings()
+      .then((offeringsRes) => {
         if (cancelled) {
           return;
         }
         setCatalogs({
           offerings: offeringsRes.data,
-          networks: networksRes.data,
-          locations: locationsRes.data,
         });
       })
       .catch(() => {
@@ -457,15 +431,6 @@ export function AdminAttendancePage() {
     value: String(offering.id),
     label: `${offering.courseCode} — ${offering.courseTitle} · ${offering.academicSessionName} · ${offering.semesterName}`,
   }));
-  const networkOptions: Option[] = (catalogs?.networks ?? []).map((network) => ({
-    value: String(network.id),
-    label: `${network.networkCode} — ${network.name}`,
-  }));
-  const locationOptions: Option[] = (catalogs?.locations ?? []).map((location) => ({
-    value: String(location.id),
-    label: location.name,
-  }));
-
   const listLoading = sessions === null && listError === null;
 
   return (
@@ -539,44 +504,6 @@ export function AdminAttendancePage() {
                 onChange={(event) => updateDraft("lecturerId", event.target.value)}
                 aria-invalid={filterFormError !== null && /Lecturer ID/i.test(filterFormError)}
               />
-            </div>
-
-            <div className="field">
-              <label className="field__label" htmlFor="filter-network">
-                Attendance network
-              </label>
-              <select
-                id="filter-network"
-                className="field__input"
-                value={draft.attendanceNetworkId}
-                onChange={(event) => updateDraft("attendanceNetworkId", event.target.value)}
-              >
-                <option value="">Any attendance network</option>
-                {networkOptions.map((option) => (
-                  <option key={option.value} value={option.value}>
-                    {option.label}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <div className="field">
-              <label className="field__label" htmlFor="filter-location">
-                Location
-              </label>
-              <select
-                id="filter-location"
-                className="field__input"
-                value={draft.locationId}
-                onChange={(event) => updateDraft("locationId", event.target.value)}
-              >
-                <option value="">Any location</option>
-                {locationOptions.map((option) => (
-                  <option key={option.value} value={option.value}>
-                    {option.label}
-                  </option>
-                ))}
-              </select>
             </div>
 
             <div className="field">
@@ -725,8 +652,6 @@ export function AdminAttendancePage() {
                   <tr>
                     <th scope="col">Course</th>
                     <th scope="col">Lecturer</th>
-                    <th scope="col">Network</th>
-                    <th scope="col">Location</th>
                     <th scope="col">Start</th>
                     <th scope="col">End</th>
                     <th scope="col">State</th>
@@ -752,15 +677,6 @@ export function AdminAttendancePage() {
                           {session.lecturerStaffId}
                         </span>
                       </td>
-                      <td>
-                        <span className="admin-table__primary">
-                          {session.attendanceNetworkCode}
-                        </span>
-                        <span className="admin-table__secondary">
-                          {session.attendanceNetworkName}
-                        </span>
-                      </td>
-                      <td>{session.locationName}</td>
                       <td>{formatDateTime(session.startTime)}</td>
                       <td>{formatDateTime(session.endTime)}</td>
                       <td>
@@ -830,14 +746,6 @@ export function AdminAttendancePage() {
               <p>
                 <span className="app-detail__label">Academic session: </span>
                 {detail.academicSessionName} · {detail.semesterName}
-              </p>
-              <p>
-                <span className="app-detail__label">Attendance network: </span>
-                {detail.attendanceNetworkCode} — {detail.attendanceNetworkName}
-              </p>
-              <p>
-                <span className="app-detail__label">Location: </span>
-                {detail.locationName}
               </p>
               <p>
                 <span className="app-detail__label">Started at: </span>

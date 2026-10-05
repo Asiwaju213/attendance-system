@@ -35,6 +35,9 @@ const MAX_REQUEST_TIMEOUT_MS = 120_000;
 /** Schema version of the feed payload, so an edge can reject what it cannot read. */
 export const SYNC_PAYLOAD_VERSION = 1;
 
+/** Version for session events after removing network/location session metadata. */
+export const SYNC_ATTENDANCE_SESSION_VERSION = 2;
+
 const TRUE_VALUES = new Set(["true", "1", "yes", "on"]);
 const FALSE_VALUES = new Set(["false", "0", "no", "off"]);
 

@@ -51,8 +51,6 @@ let offering2Id = 0;
 let offeringClosedId = 0;
 let offeringInactiveCourseId = 0;
 
-let network1Id = 0;
-let location1Id = 0;
 
 let activeOffering1SessionId = 0;
 let activeOffering2SessionId = 0;
@@ -146,19 +144,16 @@ async function insertSession(
   lateThresholdMinutes: number
 ): Promise<number> {
   const inserted = await pool.query(
-    `INSERT INTO attendance_sessions
-       (course_offering_id, started_by_lecturer_id, attendance_network_id,
-        location_id, start_time, end_time, late_threshold, status, ended_at)
-     VALUES ($1, $2, $3, $4, now() + ($5 * interval '1 minute'),
-             now() + ($6 * interval '1 minute'),
-             ($7 * interval '1 minute'), $8,
-             CASE WHEN $8 = 'ENDED' THEN now() + ($6 * interval '1 minute') END)
+        `INSERT INTO attendance_sessions
+           (course_offering_id, started_by_lecturer_id, start_time, end_time, late_threshold, status, ended_at)
+         VALUES ($1, $2, now() + ($3 * interval '1 minute'),
+           now() + ($4 * interval '1 minute'),
+           ($5 * interval '1 minute'), $6,
+           CASE WHEN $6 = 'ENDED' THEN now() + ($4 * interval '1 minute') END)
      RETURNING id`,
     [
       offeringId,
       lecturerProfileId,
-      network1Id,
-      location1Id,
       startOffsetMinutes,
       endOffsetMinutes,
       lateThresholdMinutes,
@@ -210,8 +205,6 @@ async function cleanupScopedData(): Promise<void> {
   );
   await pool.query(`DELETE FROM departments WHERE code LIKE 'SATT%'`);
   await pool.query(`DELETE FROM faculties WHERE code LIKE 'SATT%'`);
-  await pool.query(`DELETE FROM attendance_networks WHERE network_code LIKE 'SATT%'`);
-  await pool.query(`DELETE FROM locations WHERE name LIKE 'SATT-LOC%'`);
 }
 
 async function resetAttendanceRecords(): Promise<void> {
@@ -312,17 +305,6 @@ before(async () => {
     [courseInactiveId, academicSessionId, firstSemesterId]
   );
   offeringInactiveCourseId = Number(offeringInactive.rows[0].id);
-
-  const network1 = await pool.query(
-    `INSERT INTO attendance_networks (network_code, name)
-     VALUES ('SATT-NET1', 'SATT Network One') RETURNING id`
-  );
-  network1Id = Number(network1.rows[0].id);
-
-  const location1 = await pool.query(
-    `INSERT INTO locations (name) VALUES ('SATT-LOC1') RETURNING id`
-  );
-  location1Id = Number(location1.rows[0].id);
 
   async function insertUser(
     name: string,
@@ -507,8 +489,6 @@ test("SATT eligibility: a registered student sees the active sessions for their 
   assert.equal(active1!.courseCode, "SATT-101");
   assert.equal(active1!.courseTitle, "SATT Course One");
   assert.equal(active1!.lateThresholdMinutes, 5);
-  assert.equal(active1!.attendanceNetworkName, "SATT Network One");
-  assert.equal(active1!.locationName, "SATT-LOC1");
   assert.equal(active1!.currentAttendanceState, "NOT_MARKED");
   assert.equal(typeof active1!.startTime, "string");
   assert.equal(typeof active1!.endTime, "string");

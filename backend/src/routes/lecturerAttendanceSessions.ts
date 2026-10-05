@@ -61,38 +61,6 @@ function sendCreateError(res: Response, code: CreateSessionErrorCode): void {
           message: "You are not assigned to this course offering.",
         });
       return;
-    case "ATTENDANCE_NETWORK_NOT_FOUND":
-      res
-        .status(404)
-        .json({
-          error: "ATTENDANCE_NETWORK_NOT_FOUND",
-          message: "The attendance network does not exist.",
-        });
-      return;
-    case "ATTENDANCE_NETWORK_INACTIVE":
-      res
-        .status(409)
-        .json({
-          error: "ATTENDANCE_NETWORK_INACTIVE",
-          message: "The attendance network is not active.",
-        });
-      return;
-    case "LOCATION_NOT_FOUND":
-      res
-        .status(404)
-        .json({
-          error: "LOCATION_NOT_FOUND",
-          message: "The location does not exist.",
-        });
-      return;
-    case "LOCATION_INACTIVE":
-      res
-        .status(409)
-        .json({
-          error: "LOCATION_INACTIVE",
-          message: "The location is not active.",
-        });
-      return;
     case "ACTIVE_SESSION_EXISTS":
       res
         .status(409)
@@ -109,7 +77,7 @@ router.post("/attendance-sessions", async (req: Request, res: Response) => {
   if (!input) {
     sendInvalidRequest(
       res,
-      "A valid courseOfferingId, attendanceNetworkId, locationId, durationMinutes (1-480), and lateThresholdMinutes (0-120, no greater than durationMinutes) are required."
+      "A valid courseOfferingId, durationMinutes (1-480), and lateThresholdMinutes (0-120, no greater than durationMinutes) are required."
     );
     return;
   }

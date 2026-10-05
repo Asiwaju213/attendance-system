@@ -57,10 +57,6 @@ let offering2Id = 0;
 let offeringClosedId = 0;
 let offeringInactiveCourseId = 0;
 
-let network1Id = 0;
-let network2Id = 0;
-let location1Id = 0;
-let location2Id = 0;
 
 let activeOffering1SessionId = 0;
 let activeOffering2SessionId = 0;
@@ -242,24 +238,19 @@ async function insertSession(
   startOffsetMinutes: number,
   endOffsetMinutes: number,
   status: "ACTIVE" | "ENDED",
-  lateThresholdMinutes: number,
-  networkId: number = network1Id,
-  locationId: number = location1Id
+  lateThresholdMinutes: number
 ): Promise<number> {
   const inserted = await pool.query(
     `INSERT INTO attendance_sessions
-       (course_offering_id, started_by_lecturer_id, attendance_network_id,
-        location_id, start_time, end_time, late_threshold, status, ended_at)
-     VALUES ($1, $2, $3, $4, now() + ($5 * interval '1 minute'),
-             now() + ($6 * interval '1 minute'),
-             ($7 * interval '1 minute'), $8,
-             CASE WHEN $8 = 'ENDED' THEN now() + ($6 * interval '1 minute') END)
+       (course_offering_id, started_by_lecturer_id, start_time, end_time, late_threshold, status, ended_at)
+     VALUES ($1, $2, now() + ($3 * interval '1 minute'),
+             now() + ($4 * interval '1 minute'),
+             ($5 * interval '1 minute'), $6,
+             CASE WHEN $6 = 'ENDED' THEN now() + ($4 * interval '1 minute') END)
      RETURNING id`,
     [
       offeringId,
       lecturerProfileId,
-      networkId,
-      locationId,
       startOffsetMinutes,
       endOffsetMinutes,
       lateThresholdMinutes,
@@ -377,8 +368,6 @@ async function cleanupScopedData(): Promise<void> {
   await pool.query(`DELETE FROM academic_sessions WHERE name LIKE 'SHIST%'`);
   await pool.query(`DELETE FROM departments WHERE code LIKE 'SHIST%'`);
   await pool.query(`DELETE FROM faculties WHERE code LIKE 'SHIST%'`);
-  await pool.query(`DELETE FROM attendance_networks WHERE network_code LIKE 'SHIST%'`);
-  await pool.query(`DELETE FROM locations WHERE name LIKE 'SHIST-LOC%'`);
 }
 
 // ---------------------------------------------------------------------------
@@ -452,28 +441,6 @@ before(async () => {
     academicSessionId,
     firstSemesterId
   );
-
-  const net1 = await pool.query(
-    `INSERT INTO attendance_networks (network_code, name)
-     VALUES ('SHIST-NET1', 'Shist Network One') RETURNING id`
-  );
-  network1Id = Number(net1.rows[0].id);
-
-  const net2 = await pool.query(
-    `INSERT INTO attendance_networks (network_code, name)
-     VALUES ('SHIST-NET2', 'Shist Network Two') RETURNING id`
-  );
-  network2Id = Number(net2.rows[0].id);
-
-  const loc1 = await pool.query(
-    `INSERT INTO locations (name) VALUES ('SHIST-LOC1') RETURNING id`
-  );
-  location1Id = Number(loc1.rows[0].id);
-
-  const loc2 = await pool.query(
-    `INSERT INTO locations (name) VALUES ('SHIST-LOC2') RETURNING id`
-  );
-  location2Id = Number(loc2.rows[0].id);
 
   studentAUserId = await insertUser("Shist Student A", "STUDENT", "ACTIVE", null);
   studentBUserId = await insertUser("Shist Student B", "STUDENT", "ACTIVE", null);
@@ -570,8 +537,6 @@ test("Student Attendance History: authenticated student gets 200 with the expect
     new Date(session.endTime).getTime() > new Date(session.startTime).getTime()
   );
   assert.equal(session.lecturerName, "Shist Lecturer One");
-  assert.equal(session.locationName, "SHIST-LOC1");
-  assert.equal(session.attendanceNetworkName, "Shist Network One");
   assert.equal(session.status, "ABSENT");
   assert.equal(session.markedAt, null);
 });
@@ -939,16 +904,14 @@ test("Student Attendance History: completed sessions without records are all ABS
   }
 });
 
-test("Student Attendance History: lecturer, location, and network belong to the correct session", async () => {
+test("Student Attendance History: lecturer belongs to the correct session", async () => {
   const offering1EndedSessionId = await insertSession(
     offering1Id,
     lecturer2ProfileId,
     -90,
     -60,
     "ENDED",
-    5,
-    network2Id,
-    location2Id
+    5
   );
   await insertAttendanceRecord(endedSessionId, studentAProfileId, "PRESENT");
 
@@ -958,14 +921,10 @@ test("Student Attendance History: lecturer, location, and network belong to the 
   const session2 = findSession(findCourse(courses, offering2Id).sessions, endedSessionId);
   assert.ok(session2);
   assert.equal(session2.lecturerName, "Shist Lecturer One");
-  assert.equal(session2.locationName, "SHIST-LOC1");
-  assert.equal(session2.attendanceNetworkName, "Shist Network One");
 
   const session1 = findSession(findCourse(courses, offering1Id).sessions, offering1EndedSessionId);
   assert.ok(session1);
   assert.equal(session1.lecturerName, "Shist Lecturer Two");
-  assert.equal(session1.locationName, "SHIST-LOC2");
-  assert.equal(session1.attendanceNetworkName, "Shist Network Two");
 
   assert.ok(
     !Number.isNaN(Date.parse(session1.startTime)) &&
@@ -1016,8 +975,6 @@ test("Student Attendance History: response exposes no unintended or sensitive fi
       "startTime",
       "endTime",
       "lecturerName",
-      "locationName",
-      "attendanceNetworkName",
       "status",
       "markedAt",
     ].sort()

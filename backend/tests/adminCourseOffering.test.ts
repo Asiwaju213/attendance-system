@@ -183,8 +183,6 @@ async function cleanupScopedData(): Promise<void> {
       [LECTURER_1_STAFF_ID, LECTURER_2_STAFF_ID, INACTIVE_LECTURER_STAFF_ID, NON_LECTURER_STAFF_ID],
     ]
   );
-  await pool.query(`DELETE FROM attendance_networks WHERE network_code LIKE 'ADMCOF%'`);
-  await pool.query(`DELETE FROM locations WHERE name LIKE 'ADMCOF%'`);
   await pool.query(`DELETE FROM courses WHERE course_code LIKE 'ADMCOF%'`);
   await pool.query(`DELETE FROM departments WHERE code LIKE 'ADMCOF%'`);
   await pool.query(`DELETE FROM faculties WHERE code LIKE 'ADMCOF%'`);
@@ -751,25 +749,12 @@ test("status changes remain possible when registrations exist", async () => {
 
 test("identity changes are rejected when attendance records exist", async () => {
   const token = await adminToken();
-  const network = await pool.query(
-    `INSERT INTO attendance_networks (network_code, name)
-     VALUES ('ADMCOF-NET', 'Offering Test Network') RETURNING id`
-  );
-  const location = await pool.query(
-    `INSERT INTO locations (name) VALUES ('ADMCOF-LOCATION') RETURNING id`
-  );
   const session = await pool.query(
     `INSERT INTO attendance_sessions
-       (course_offering_id, started_by_lecturer_id, attendance_network_id, location_id,
-        start_time, end_time, status)
-     VALUES ($1, $2, $3, $4, now() - interval '1 hour', now(), 'ENDED')
+       (course_offering_id, started_by_lecturer_id, start_time, end_time, status)
+     VALUES ($1, $2, now() - interval '1 hour', now(), 'ENDED')
      RETURNING id`,
-    [
-      offeringId2,
-      lecturer1ProfileId,
-      Number(network.rows[0].id),
-      Number(location.rows[0].id),
-    ]
+    [offeringId2, lecturer1ProfileId]
   );
   const sessionId = Number(session.rows[0].id);
   await pool.query(

@@ -5,8 +5,6 @@ export interface LecturerReportSessionDetail {
   startTime: string;
   endTime: string;
   lecturerName: string;
-  locationName: string;
-  attendanceNetworkName: string;
   status: LecturerReportAttendanceStatus;
   markedAt: string | null;
 }
@@ -64,8 +62,6 @@ export interface LecturerSessionAttendanceReport {
     academicSession: string;
     semester: string;
     level: number;
-    attendanceNetworkName: string;
-    locationName: string;
     startTime: string;
     endTime: string;
     lateThresholdMinutes: number;

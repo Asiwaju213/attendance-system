@@ -35,8 +35,6 @@ interface MockSession {
   startTime: string;
   endTime: string;
   lecturerName: string;
-  locationName: string;
-  attendanceNetworkName: string;
   status: "PRESENT" | "LATE" | "ABSENT";
   markedAt: string | null;
 }
@@ -84,8 +82,6 @@ function session(
     startTime: `2026-02-${day}T09:00:00.000Z`,
     endTime: `2026-02-${day}T10:30:00.000Z`,
     lecturerName: `E2E ${label} Lecturer`,
-    locationName: `E2E ${label} Hall`,
-    attendanceNetworkName: `E2E Network ${id}`,
     status,
     markedAt,
   };
@@ -812,10 +808,6 @@ test("a real monitor lecturer sees the real E2E-101 report from the backend", as
       const liveSession = studentRow!.sessions[i];
       const item = sessionItems.nth(i);
       await expect(item).toContainText(`Lecturer: ${liveSession.lecturerName}`);
-      await expect(item).toContainText(`Location: ${liveSession.locationName}`);
-      await expect(item).toContainText(
-        `Attendance network: ${liveSession.attendanceNetworkName}`
-      );
       await expect(item.locator(".history-status")).toHaveText(
         STATUS_LABELS[liveSession.status]
       );

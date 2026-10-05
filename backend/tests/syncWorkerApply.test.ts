@@ -56,8 +56,6 @@ async function seedFeedEvents(
       cloudSessionId: 1000 + index,
       cloudCourseOfferingId: 7,
       cloudLecturerId: 3,
-      cloudAttendanceNetworkId: 2,
-      cloudLocationId: 1,
       courseCode: "SYNC 101",
       courseTitle: "Synchronization Fundamentals",
       startTime: new Date().toISOString(),

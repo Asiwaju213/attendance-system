@@ -22,8 +22,6 @@ function sessionDetail(
     startTime: `2026-02-${day}T09:00:00.000Z`,
     endTime: `2026-02-${day}T10:30:00.000Z`,
     lecturerName: "Ada Obi",
-    locationName: "LT1",
-    attendanceNetworkName: "HallNet",
     status,
     markedAt,
   };
@@ -40,8 +38,6 @@ function sessionReport(
       academicSession: "2025/2026",
       semester: "Second Semester",
       level: 400,
-      attendanceNetworkName: "HallNet",
-      locationName: "LT1",
       startTime: "2026-02-10T09:00:00.000Z",
       endTime: "2026-02-10T10:30:00.000Z",
       lateThresholdMinutes: 5,
@@ -303,8 +299,11 @@ test("the session details sheet lists every student session with metadata", () =
 
   assert.equal(details.getCell(1, 1).value, "Student Name");
   assert.equal(details.getCell(1, 6).value, "Status");
-  assert.equal(details.getCell(1, 8).value, "Location");
-  assert.equal(details.getCell(1, 9).value, "Attendance Network");
+  // The Location and Attendance Network columns were removed with the rest of
+  // the session metadata (migrations 017 and 018); the sheet ends at Marked At.
+  assert.equal(details.getCell(1, 7).value, "Marked At");
+  assert.equal(details.getCell(1, 8).value, undefined);
+  assert.equal(details.getCell(1, 9).value, undefined);
 
   assert.equal(details.getCell(2, 1).value, "Student Alpha");
   assert.equal(details.getCell(2, 2).value, "19/52HA001");

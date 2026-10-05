@@ -17,12 +17,17 @@ This directory holds the PostgreSQL schema for the OOU Attendance System. Migrat
 9. `course_offerings` — a course offered in a specific session + semester. One offering can have several lecturers.
 10. `course_offering_lecturers` — many-to-many link between offerings and lecturers (no duplicate assignment).
 11. `course_registrations` — a student registered for an offering (`UNIQUE(student_id, course_offering_id)`).
-12. `attendance_networks` — movable networks (e.g. `NET-001`), never glued to a location/course.
-13. `locations` — where a session happened, for reporting only.
-14. `attendance_sessions` — a session started by a lecturer for an offering, with chosen end time and late threshold. One `ACTIVE` session per lecturer is enforced.
-15. `attendance_records` — only `PRESENT` / `LATE` rows; absence is inferred from missing rows.
-16. `student_devices` — secure device credentials; at most one `ACTIVE` device per student; revoked devices are kept.
-17. `audit_logs` — important events (creation/deactivation, session start/end, device revocations, etc.).
+12. `attendance_sessions` — a session started by a lecturer for an offering, with chosen end time and late threshold. One `ACTIVE` session per lecturer is enforced.
+13. `attendance_records` — only `PRESENT` / `LATE` rows; absence is inferred from missing rows.
+14. `student_devices` — secure device credentials; at most one `ACTIVE` device per student; revoked devices are kept.
+15. `audit_logs` — important events (creation/deactivation, session start/end, device revocations, etc.).
+
+Migration 001 also created `attendance_networks` and `locations`, and
+`attendance_sessions` required one of each. Those columns are removed by
+`017_remove_session_network_location.sql` and the two tables are dropped by
+`018_drop_attendance_networks_and_locations.sql`: a session no longer records a
+network or a room, because students now mark attendance on any device in the
+school and there is nothing for a session to be pinned to.
 
 It also creates a small `set_updated_at()` trigger, useful indexes on foreign keys, and reference seed data (levels and semesters).
 
@@ -57,6 +62,41 @@ Later migrations build on this foundation:
   - `transports TEXT[]`, `cred_type TEXT NOT NULL DEFAULT 'public-key'` (CHECK), `aaguid TEXT`, `label TEXT` (display-only), `updated_at` (+ `set_updated_at()` trigger).
 - Keeps the partial unique index `one_active_device_per_student ON (student_id) WHERE status = 'ACTIVE'`, so a student can hold many revoked devices but at most one `ACTIVE` one. The `UNIQUE(credential_id)` index is the second backstop.
 - Adds `student_device_enrollment_challenges` — server-side, single-use enrollment challenges stored as a SHA-256 hash only (`challenge_hash`), bound to a student, with status `ACTIVE`/`USED`/`EXPIRED` and a partial unique index `one_active_device_enrollment_challenge` enforcing at most one `ACTIVE` challenge per student.
+
+## Migrations 017 and 018: attendance network/location removal
+
+Two migrations retire the session metadata that pinned a session to a network and
+a room. 017 drops the columns, 018 drops the now-unreferenced tables.
+
+`017_remove_session_network_location.sql` removes four columns, dropping each
+foreign key and any index that covered it first:
+
+| Table | Column |
+|---|---|
+| `attendance_sessions` | `attendance_network_id` |
+| `attendance_sessions` | `location_id` |
+| `sync_attendance_sessions` | `cloud_attendance_network_id` |
+| `sync_attendance_sessions` | `cloud_location_id` |
+
+`018_drop_attendance_networks_and_locations.sql` then drops `attendance_networks`
+and `locations` outright. They were referenced only by the two
+`attendance_sessions` columns 017 removed, so nothing else could legitimately still
+use them.
+
+The last two dependants were the `set_updated_at()` triggers from migration 001,
+which are dropped explicitly before the tables, since PostgreSQL would otherwise
+refuse the `DROP TABLE`.
+
+Why the metadata is gone rather than merely optional: a student now marks
+attendance with WebAuthn on any device in the school, so there is no network or
+room for a session to be checked against, and no legitimate feature needed these
+tables for anything else.
+
+Historical rows are preserved. `sync_change_events` is append-only with no CHECK
+constraint on `entity_type`, so the `location` and `attendance_network` events the
+cloud wrote before the drop are left in place; an edge retires them as it drains
+past its cursor. Attendance records, sessions and marks are untouched by both
+migrations.
 
 ## How to apply the migrations
 

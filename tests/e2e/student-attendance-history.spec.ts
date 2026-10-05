@@ -22,8 +22,6 @@ interface HistorySession {
   startTime: string;
   endTime: string;
   lecturerName: string;
-  locationName: string;
-  attendanceNetworkName: string;
   status: "PRESENT" | "LATE" | "ABSENT";
   markedAt: string | null;
 }
@@ -72,8 +70,6 @@ function historyCourse(
         startTime: "2026-02-10T09:00:00.000Z",
         endTime: "2026-02-10T10:30:00.000Z",
         lecturerName: "E2E Present Lecturer",
-        locationName: "E2E Present Hall",
-        attendanceNetworkName: "E2E Network One",
         status: "PRESENT",
         markedAt: "2026-02-10T09:10:00.000Z",
       },
@@ -82,8 +78,6 @@ function historyCourse(
         startTime: "2026-02-11T09:00:00.000Z",
         endTime: "2026-02-11T10:30:00.000Z",
         lecturerName: "E2E Late Lecturer",
-        locationName: "E2E Late Hall",
-        attendanceNetworkName: "E2E Network Two",
         status: "LATE",
         markedAt: "2026-02-11T10:00:00.000Z",
       },
@@ -92,8 +86,6 @@ function historyCourse(
         startTime: "2026-02-12T09:00:00.000Z",
         endTime: "2026-02-12T10:30:00.000Z",
         lecturerName: "E2E Absent Lecturer",
-        locationName: "E2E Absent Hall",
-        attendanceNetworkName: "E2E Network Three",
         status: "ABSENT",
         markedAt: null,
       },
@@ -244,10 +236,6 @@ test("a real authenticated student sees the real attendance history from the bac
       const session = course!.sessions[i];
       const item = sessionItems.nth(i);
       await expect(item).toContainText(`Lecturer: ${session.lecturerName}`);
-      await expect(item).toContainText(`Location: ${session.locationName}`);
-      await expect(item).toContainText(
-        `Attendance network: ${session.attendanceNetworkName}`
-      );
       await expect(item.locator(".history-status")).toHaveText(
         STATUS_LABELS[session.status]
       );

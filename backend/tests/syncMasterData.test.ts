@@ -47,8 +47,6 @@ before(async () => {
     graph.academicSessionSyncId,
     graph.semesterSyncId,
     graph.courseOfferingSyncId,
-    graph.locationSyncId,
-    graph.networkSyncId,
     graph.lecturerSyncId,
   ]);
   events = batch.events.filter((event) => ourEntityIds.has(event.entityId));
@@ -95,8 +93,6 @@ test("creating each master-data entity emits exactly one CREATED event", () => {
     ["academic_session", graph.academicSessionSyncId, "CREATED"],
     ["semester", graph.semesterSyncId, "UPDATED"],
     ["course_offering", graph.courseOfferingSyncId, "CREATED"],
-    ["location", graph.locationSyncId, "CREATED"],
-    ["attendance_network", graph.networkSyncId, "CREATED"],
     ["lecturer", graph.lecturerSyncId, "CREATED"],
   ];
 
@@ -297,18 +293,19 @@ test("the edge writes master data into its own tables, resolving parents by UUID
   assert.equal(offering.rowCount, 1);
   assert.equal(offering.rows[0].course_sync_id, graph.courseSyncId);
   assert.equal(offering.rows[0].status, "OPEN");
+});
 
-  const location = await pool.query(
-    `SELECT name, status FROM locations WHERE sync_id = $1`,
-    [graph.locationSyncId]
-  );
-  assert.equal(location.rowCount, 1);
-
-  const network = await pool.query(
-    `SELECT network_code, name, status FROM attendance_networks WHERE sync_id = $1`,
-    [graph.networkSyncId]
-  );
-  assert.equal(network.rowCount, 1);
+test("the retired location and attendance_network tables no longer exist", async () => {
+  // Migration 018 dropped both. They existed only to populate the session
+  // columns migration 017 removed, so nothing should recreate them.
+  for (const table of ["locations", "attendance_networks"]) {
+    const row = await pool.query(`SELECT to_regclass($1) AS oid`, [table]);
+    assert.equal(
+      row.rows[0].oid,
+      null,
+      `${table} should have been dropped by migration 018`
+    );
+  }
 });
 
 test("the edge stores lecturers in the projection and never in users", async () => {
@@ -441,8 +438,6 @@ test("the feed serves mixed entity types in one ordered page", async () => {
     "academic_session",
     "semester",
     "course_offering",
-    "location",
-    "attendance_network",
     "lecturer",
   ]) {
     assert.ok(types.has(expected as never), `feed should carry ${expected} events`);

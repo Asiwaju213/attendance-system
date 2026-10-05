@@ -26,10 +26,25 @@ export const SYNC_ENTITY_TYPES = [
   "academic_session",
   "semester",
   "course_offering",
-  "location",
-  "attendance_network",
   "lecturer",
 ] as const;
+
+/**
+ * Entity types that used to be synchronized and no longer exist.
+ *
+ * The `attendance_networks` and `locations` tables are dropped by migration 018;
+ * nothing writes an event for them any more. Rows already in the cloud's
+ * append-only feed are kept, because `sync_change_events.entity_type` is plain
+ * TEXT with no check constraint and the feed is never rewritten.
+ *
+ * An edge whose cursor has not yet reached one of those events must be able to
+ * drain past it, so these names stay recognized on the receiving side and are
+ * retired as they are claimed. Deleting them from the list above is what stops
+ * any new event from being produced.
+ */
+export const RETIRED_SYNC_ENTITY_TYPES = ["location", "attendance_network"] as const;
+
+export type RetiredSyncEntityType = (typeof RETIRED_SYNC_ENTITY_TYPES)[number];
 
 export type SyncEntityType = (typeof SYNC_ENTITY_TYPES)[number];
 
@@ -47,8 +62,7 @@ export interface SyncedPayloadBase {
  * This is the complete local projection of the session, not a partial patch, so
  * an edge can apply any single event without having seen the ones before it.
  *
- * `cloudSessionId`, `cloudCourseOfferingId`, `cloudLecturerId`,
- * `cloudAttendanceNetworkId` and `cloudLocationId` are cloud database identifiers
+ * `cloudSessionId`, `cloudCourseOfferingId` and `cloudLecturerId` are cloud database identifiers
  * that are meaningless locally. They are carried so the edge can join to those
  * entities once they are synchronized; they are NOT local identities and must
  * never be used to address a local row.
@@ -65,8 +79,6 @@ export interface SyncedAttendanceSession extends SyncedPayloadBase {
   cloudSessionId: number;
   cloudCourseOfferingId: number;
   cloudLecturerId: number;
-  cloudAttendanceNetworkId: number;
-  cloudLocationId: number;
   courseCode: string;
   courseTitle: string;
   lecturerDisplayName: string;
@@ -148,22 +160,6 @@ export interface SyncedCourseOffering extends SyncedPayloadBase {
   cloudSemesterSyncId: string;
 }
 
-export interface SyncedLocation extends SyncedPayloadBase {
-  syncId: string;
-  cloudLocationId: number;
-  name: string;
-  description: string | null;
-  status: "ACTIVE" | "INACTIVE";
-}
-
-export interface SyncedAttendanceNetwork extends SyncedPayloadBase {
-  syncId: string;
-  cloudAttendanceNetworkId: number;
-  networkCode: string;
-  name: string;
-  status: "ACTIVE" | "INACTIVE";
-}
-
 /**
  * A cloud lecturer, projected rather than mirrored.
  *
@@ -195,8 +191,6 @@ export type SyncedEntityPayload =
   | SyncedAcademicSession
   | SyncedSemester
   | SyncedCourseOffering
-  | SyncedLocation
-  | SyncedAttendanceNetwork
   | SyncedLecturer;
 
 /**

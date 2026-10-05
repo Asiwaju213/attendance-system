@@ -59,8 +59,6 @@ let lifecycleTarget: StudentFixture;
 let concurrentEnrollTarget: StudentFixture;
 
 let offeringId = 0;
-let networkId = 0;
-let locationId = 0;
 const sessionIds: number[] = [];
 
 const sessionTokens: Record<number, string> = {};
@@ -241,8 +239,6 @@ async function cleanupFixtures(): Promise<void> {
   );
   await pool.query(`DELETE FROM courses WHERE course_code LIKE 'ASD-%'`);
   await pool.query(`DELETE FROM academic_sessions WHERE name LIKE 'ASD-%'`);
-  await pool.query(`DELETE FROM attendance_networks WHERE network_code LIKE 'ASD-%'`);
-  await pool.query(`DELETE FROM locations WHERE name LIKE 'ASD-%'`);
   await pool.query(
     `DELETE FROM sessions
      WHERE user_id IN (
@@ -303,19 +299,6 @@ before(async () => {
     [courseId, academicSessionId, semesterId]
   );
   offeringId = Number(offering.rows[0].id);
-
-  const network = await pool.query(
-    `INSERT INTO attendance_networks (network_code, name)
-     VALUES ($1, 'ASD Net') RETURNING id`,
-    [`ASD-NET-${RUN_ID}`]
-  );
-  networkId = Number(network.rows[0].id);
-
-  const location = await pool.query(
-    `INSERT INTO locations (name) VALUES ($1) RETURNING id`,
-    [`ASD-LOC-${RUN_ID}`]
-  );
-  locationId = Number(location.rows[0].id);
 
   const admin = await pool.query(
     `INSERT INTO users (name, password_hash, role, status, username)
@@ -424,18 +407,12 @@ before(async () => {
         (
           await pool.query(
             `INSERT INTO attendance_sessions
-               (course_offering_id, started_by_lecturer_id, attendance_network_id,
-                location_id, start_time, end_time, late_threshold, status)
-             VALUES ($1, $2, $3, $4,
+               (course_offering_id, started_by_lecturer_id, start_time, end_time, late_threshold, status)
+             VALUES ($1, $2,
                      now() - interval '1 minute', now() + interval '60 minutes',
                      interval '10 minutes', 'ACTIVE')
              RETURNING id`,
-            [
-              offeringId,
-              Number(sessionLecturerProfile.rows[0].id),
-              networkId,
-              locationId,
-            ]
+            [offeringId, Number(sessionLecturerProfile.rows[0].id)]
           )
         ).rows[0].id
       )

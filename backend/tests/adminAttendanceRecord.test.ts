@@ -42,8 +42,6 @@ let semesterId = 0;
 let courseId = 0;
 let offeringId = 0;
 
-let networkId = 0;
-let locationId = 0;
 
 // Multiple sessions, each with one record for student A (to respect UNIQUE session_id, student_id)
 let sessionMain = 0;
@@ -135,7 +133,7 @@ async function cleanupScopedData(): Promise<void> {
        SELECT id FROM students WHERE matric_number LIKE 'ADMRecTest/%'
      )`
   );
-  // Attendance sessions reference course_offerings, networks, locations, lecturers
+  // Attendance sessions reference course offerings and lecturers.
   await pool.query(
     `DELETE FROM attendance_sessions
      WHERE started_by_lecturer_id IN (
@@ -196,11 +194,6 @@ async function cleanupScopedData(): Promise<void> {
   await pool.query(`DELETE FROM departments WHERE code LIKE 'ADMRecTest%'`);
   // Faculties (after departments)
   await pool.query(`DELETE FROM faculties WHERE code LIKE 'ADMRecTest%'`);
-  // Networks, locations
-  await pool.query(
-    `DELETE FROM attendance_networks WHERE network_code LIKE 'ADMRecTest%'`
-  );
-  await pool.query(`DELETE FROM locations WHERE name LIKE 'ADMRecTest%'`);
 }
 
 async function resetRecordStatus(
@@ -405,18 +398,6 @@ before(async () => {
   );
   offeringId = Number(off.rows[0].id);
 
-  // --- Network / Location ---
-  const net = await pool.query(
-    `INSERT INTO attendance_networks (network_code, name)
-     VALUES ('ADMRecTest-NET', 'ADMRecTest Network') RETURNING id`
-  );
-  networkId = Number(net.rows[0].id);
-
-  const loc = await pool.query(
-    `INSERT INTO locations (name) VALUES ('ADMRecTest-LOC') RETURNING id`
-  );
-  locationId = Number(loc.rows[0].id);
-
   // --- Student A (main) ---
   const stu = await pool.query(
     `INSERT INTO users (name, password_hash, role, status, username)
@@ -468,66 +449,61 @@ before(async () => {
 
   // --- Attendance Session 1: Main (ENDED for stability) ---
   const sessMain = await pool.query(
-    `INSERT INTO attendance_sessions
-       (course_offering_id, started_by_lecturer_id, attendance_network_id,
-        location_id, start_time, end_time, late_threshold, status, ended_at)
-     VALUES ($1, $2, $3, $4,
+     `INSERT INTO attendance_sessions
+       (course_offering_id, started_by_lecturer_id, start_time, end_time, late_threshold, status, ended_at)
+      VALUES ($1, $2,
              now() - interval '2 hours', now() - interval '1 hour',
              '5 minutes', 'ENDED', now() - interval '1 hour')
      RETURNING id`,
-    [offeringId, lecturerProfileId, networkId, locationId]
+     [offeringId, lecturerProfileId]
   );
   sessionMain = Number(sessMain.rows[0].id);
 
   // --- Attendance Session 2: Victim (for cross-record test) ---
   const sessVictim = await pool.query(
-    `INSERT INTO attendance_sessions
-       (course_offering_id, started_by_lecturer_id, attendance_network_id,
-        location_id, start_time, end_time, late_threshold, status, ended_at)
-     VALUES ($1, $2, $3, $4,
+     `INSERT INTO attendance_sessions
+       (course_offering_id, started_by_lecturer_id, start_time, end_time, late_threshold, status, ended_at)
+      VALUES ($1, $2,
              now() - interval '2 hours', now() - interval '1 hour',
              '5 minutes', 'ENDED', now() - interval '1 hour')
      RETURNING id`,
-    [offeringId, lecturerProfileId, networkId, locationId]
+     [offeringId, lecturerProfileId]
   );
   sessionVictim = Number(sessVictim.rows[0].id);
 
   // --- Attendance Session 3: Concurrency ---
   const sessConcurrency = await pool.query(
-    `INSERT INTO attendance_sessions
-       (course_offering_id, started_by_lecturer_id, attendance_network_id,
-        location_id, start_time, end_time, late_threshold, status, ended_at)
-     VALUES ($1, $2, $3, $4,
+     `INSERT INTO attendance_sessions
+       (course_offering_id, started_by_lecturer_id, start_time, end_time, late_threshold, status, ended_at)
+      VALUES ($1, $2,
              now() - interval '2 hours', now() - interval '1 hour',
              '5 minutes', 'ENDED', now() - interval '1 hour')
      RETURNING id`,
-    [offeringId, lecturerProfileId, networkId, locationId]
+     [offeringId, lecturerProfileId]
   );
   sessionConcurrency = Number(sessConcurrency.rows[0].id);
 
   // --- Attendance Session 4: Atomicity ---
   const sessAtomic = await pool.query(
-    `INSERT INTO attendance_sessions
-       (course_offering_id, started_by_lecturer_id, attendance_network_id,
-        location_id, start_time, end_time, late_threshold, status, ended_at)
-     VALUES ($1, $2, $3, $4,
+     `INSERT INTO attendance_sessions
+       (course_offering_id, started_by_lecturer_id, start_time, end_time, late_threshold, status, ended_at)
+      VALUES ($1, $2,
              now() - interval '2 hours', now() - interval '1 hour',
              '5 minutes', 'ENDED', now() - interval '1 hour')
      RETURNING id`,
-    [offeringId, lecturerProfileId, networkId, locationId]
+     [offeringId, lecturerProfileId]
   );
   sessionAtomic = Number(sessAtomic.rows[0].id);
 
   // --- Attendance Session 5: Failed correction ---
   const sessFailed = await pool.query(
-    `INSERT INTO attendance_sessions
-       (course_offering_id, started_by_lecturer_id, attendance_network_id,
-        location_id, start_time, end_time, late_threshold, status, ended_at)
-     VALUES ($1, $2, $3, $4,
+     `INSERT INTO attendance_sessions
+       (course_offering_id, started_by_lecturer_id, start_time, end_time, late_threshold, status, ended_at)
+      VALUES ($1, $2,
              now() - interval '2 hours', now() - interval '1 hour',
              '5 minutes', 'ENDED', now() - interval '1 hour')
      RETURNING id`,
-    [offeringId, lecturerProfileId, networkId, locationId]
+     [offeringId, lecturerProfileId]
   );
   sessionFailed = Number(sessFailed.rows[0].id);
 

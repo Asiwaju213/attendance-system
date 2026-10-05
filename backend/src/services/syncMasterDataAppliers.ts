@@ -1,10 +1,10 @@
 import type { PoolClient } from "pg";
 import { SYNC_PAYLOAD_VERSION } from "../config/sync";
+import { RETIRED_SYNC_ENTITY_TYPES } from "../types/sync";
 import type {
   SyncChangeEvent,
   SyncEntityType,
   SyncedAcademicSession,
-  SyncedAttendanceNetwork,
   SyncedCourse,
   SyncedCourseOffering,
   SyncedDepartment,
@@ -12,7 +12,6 @@ import type {
   SyncedFaculty,
   SyncedLecturer,
   SyncedLevel,
-  SyncedLocation,
   SyncedSemester,
 } from "../types/sync";
 import { SyncApplyError } from "./syncErrors";
@@ -23,12 +22,11 @@ import { SyncApplyError } from "./syncErrors";
  * Two different destinations, and the difference is the whole point of Task 2's
  * scope decision:
  *
- * - The nine reference tables (faculties, departments, levels, courses,
- *   academic_sessions, semesters, course_offerings, locations,
- *   attendance_networks) are mirrored into the edge's REAL tables. The edge never
- *   authors these rows, so writing the cloud's authoritative copy in place of an
- *   absent local one keeps foreign keys, joins and existing queries working
- *   normally instead of behind a parallel projection.
+ * - The seven reference tables (faculties, departments, levels, courses,
+ *   academic_sessions, semesters, course_offerings) are mirrored into the edge's
+ *   REAL tables. The edge never authors these rows, so writing the cloud's
+ *   authoritative copy in place of an absent local one keeps foreign keys, joins
+ *   and existing queries working normally instead of behind a parallel projection.
  *
  * - Lecturers go to the `sync_lecturers` projection instead. A lecturer's
  *   `user_id` points into `users`, and the edge's `users` table is its own
@@ -58,8 +56,6 @@ type MirroredTable =
   | "academic_sessions"
   | "semesters"
   | "course_offerings"
-  | "locations"
-  | "attendance_networks"
   | "sync_lecturers";
 
 /**
@@ -139,9 +135,9 @@ interface MirroredUpsert {
  *   An upsert that only conflicts on `sync_id` would therefore not conflict at
  *   all, and the INSERT would instead violate the UNIQUE constraint on the
  *   business key - `levels.name`, `faculties.code`, `departments.code`,
- *   `semesters.name`, `courses.course_code`, `academic_sessions.name` or
- *   `attendance_networks.network_code`. That aborts the whole apply transaction,
- *   so a fresh edge could never synchronize past its own seed data.
+ *   `semesters.name`, `courses.course_code` or `academic_sessions.name`. That
+ *   aborts the whole apply transaction, so a fresh edge could never synchronize
+ *   past its own seed data.
  *
  *   Matching the business key and adopting the cloud's `sync_id` onto the
  *   existing row resolves that collision AND keeps the row's local integer id
@@ -207,8 +203,6 @@ export const MASTER_DATA_ENTITY_TYPES: readonly SyncEntityType[] = [
   "academic_session",
   "semester",
   "course_offering",
-  "location",
-  "attendance_network",
   "lecturer",
 ] as const;
 
@@ -216,6 +210,23 @@ export function isMasterDataEntityType(
   entityType: string
 ): entityType is (typeof MASTER_DATA_ENTITY_TYPES)[number] {
   return (MASTER_DATA_ENTITY_TYPES as readonly string[]).includes(entityType);
+}
+
+/**
+ * An entity type whose table no longer exists on either side.
+ *
+ * The cloud's feed is append-only and still holds any `location` or
+ * `attendance_network` event it wrote before migration 018 dropped those tables.
+ * An edge whose cursor has not reached one of those events must still be able to
+ * move forward: the event is claimed (so idempotency and contiguity hold) and
+ * counted as applied without writing anything, which is the correct outcome for a
+ * row that describes data nobody reads any more.
+ *
+ * Distinct from the unknown-entity case, which stays fatal on purpose: this edge
+ * does not know what that event meant, so advancing past it would lose data.
+ */
+export function isRetiredEntityType(entityType: string): boolean {
+  return (RETIRED_SYNC_ENTITY_TYPES as readonly string[]).includes(entityType);
 }
 
 function requirePayload<T>(
@@ -438,52 +449,6 @@ async function applyCourseOffering(
   });
 }
 
-async function applyLocation(
-  client: PoolClient,
-  payload: SyncedLocation
-): Promise<void> {
-  // `locations.name` is not unique - two sites may share a name - so there is no
-  // business key to reconcile against and only the cloud identity applies.
-  const values = [
-    payload.syncId,
-    payload.name,
-    payload.description,
-    payload.status,
-  ];
-  await upsertMirrored(client, {
-    table: "locations",
-    identityColumn: "sync_id",
-    insertSql: `INSERT INTO locations (sync_id, name, description, status)
-                VALUES ($1, $2, $3, $4)`,
-    insertValues: values,
-    set: "sync_id = $1, name = $2, description = $3, status = $4",
-    setValues: values,
-    naturalKey: null,
-  });
-}
-
-async function applyAttendanceNetwork(
-  client: PoolClient,
-  payload: SyncedAttendanceNetwork
-): Promise<void> {
-  const values = [
-    payload.syncId,
-    payload.networkCode,
-    payload.name,
-    payload.status,
-  ];
-  await upsertMirrored(client, {
-    table: "attendance_networks",
-    identityColumn: "sync_id",
-    insertSql: `INSERT INTO attendance_networks (sync_id, network_code, name, status)
-                VALUES ($1, $2, $3, $4)`,
-    insertValues: values,
-    set: "sync_id = $1, network_code = $2, name = $3, status = $4",
-    setValues: values,
-    naturalKey: { columns: ["network_code"], values: [payload.networkCode] },
-  });
-}
-
 async function applyLecturer(
   client: PoolClient,
   payload: SyncedLecturer
@@ -560,13 +525,10 @@ export async function applyMasterDataEvent(
         client,
         requirePayload<SyncedCourseOffering>(entityType, event.payload)
       );
-    case "location":
-      return applyLocation(client, requirePayload<SyncedLocation>(entityType, event.payload));
-    case "attendance_network":
-      return applyAttendanceNetwork(
-        client,
-        requirePayload<SyncedAttendanceNetwork>(entityType, event.payload)
-      );
+    // A location or attendance_network event can only be a row the cloud wrote
+    // before its table was dropped by migration 018. The caller retires those
+    // without applying them; if one reaches here the entityType is not one this
+    // edge knows, so it is refused rather than silently discarded.
     case "lecturer":
       return applyLecturer(client, requirePayload<SyncedLecturer>(entityType, event.payload));
     default:

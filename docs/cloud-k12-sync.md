@@ -270,6 +270,35 @@ require('crypto').createHash('sha256').update(s).digest('hex'))"
 Put the secret in the PC's `backend/.env` and the digest in Render's encrypted
 environment variables. Rotate by generating a new pair and updating both sides.
 
+## Which deployment serves students
+
+Synchronization decides who holds authoritative data. It does **not** decide who
+may sign in as a student. That is `STUDENT_ACCESS_MODE`, a separate variable, and
+the two are independent on purpose: an edge may sync or not, and the cloud
+provides the feed either way.
+
+| Deployment | `STUDENT_ACCESS_MODE` | Result |
+|---|---|---|
+| Cloud / Render | `cloud` (or unset) | Student sign-in and every `/api/student/*` API answer `403 STUDENT_ACCESS_DISABLED`. Admin and lecturer work normally. |
+| Local K12 PC | `edge` | Students sign in and use attendance normally. |
+
+Unset means `cloud`, so a deployment nobody configured cannot expose students to
+the open Internet. An unrecognized value fails at startup instead of defaulting.
+
+This is **not an IP allowlist**. The deployed API is reached through the Vercel
+rewrite in front of Render, so the client address the application sees is a proxy
+address of uncertain meaning (see `config/trustProxy.ts`), and a forwarded header
+is client-influenceable. No part of the policy reads an address: the mode is
+configuration, decided once by an operator.
+
+What the mode does **not** do is keep the edge private. It decides who the
+software will serve, not who can reach the PC. Keeping the edge off the Internet
+remains the router's and the firewall's responsibility — see
+[`lan-mode.md`](lan-mode.md).
+
+To confirm which mode a running process resolved, read the startup log line, or
+`GET /api/health`, which reports `studentAccessMode`.
+
 ## Schema
 
 Migration `012_cloud_k12_sync_change_feed.sql` adds:
@@ -313,7 +342,14 @@ lifetimes, so conflating them would let a cursor reset silently discard receipts
   copy back and forth.
 
 Master data (faculties, departments, levels, courses, offerings, academic sessions,
-semesters, locations, networks, lecturers) is synchronized cloud → edge.
+semesters, lecturers) is synchronized cloud → edge.
+
+Attendance sessions are synchronized too, without any network or location: a
+session payload carries the offering, lecturer, times, late threshold and status
+only (see `SYNC_ATTENDANCE_SESSION_VERSION` in `config/sync.ts`). The
+`location` and `attendance_network` entity types were removed from the vocabulary
+by migrations 017 and 018; an edge that still has such an event queued behind its
+cursor retires it instead of failing, so it can drain past it.
 
 ## Reference-data conflicts
 
@@ -339,8 +375,8 @@ npx tsx scripts/backfillMasterDataFeed.ts
 
 It emits dependency-ordered full-state events in one transaction (faculties →
 departments → levels → academic sessions → semesters → courses → offerings →
-locations → networks → lecturers), because an edge cannot write a course offering
-before the rows it references exist locally.
+lecturers), because an edge cannot write a course offering before the rows it
+references exist locally.
 
 ## Running it
 

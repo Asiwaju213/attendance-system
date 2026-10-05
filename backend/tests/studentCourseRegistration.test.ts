@@ -64,8 +64,6 @@ let offeringGST200F2 = 0;
 let offeringGST300 = 0;
 let offeringGST2ND = 0;
 
-let regcNetworkId = 0;
-let regcLocationId = 0;
 let regcAttendanceSessionId = 0;
 
 const ALL_USER_IDS = () => [
@@ -193,8 +191,6 @@ async function cleanupScopedData(): Promise<void> {
   );
   await pool.query(`DELETE FROM departments WHERE code LIKE 'REGC%'`);
   await pool.query(`DELETE FROM faculties WHERE code LIKE 'REGC%'`);
-  await pool.query(`DELETE FROM attendance_networks WHERE network_code LIKE 'REGC%'`);
-  await pool.query(`DELETE FROM locations WHERE name LIKE 'REGC-LOC%'`);
 }
 
 before(async () => {
@@ -404,23 +400,13 @@ before(async () => {
   // Attendance fixture: one ACTIVE session on CSC201 (which student A registers
   // for during the registration tests) so enrollment -> attendance eligibility
   // integration can be verified end to end.
-  const network = await pool.query(
-    `INSERT INTO attendance_networks (network_code, name)
-     VALUES ('REGC-NET', 'Regc Network') RETURNING id`
-  );
-  regcNetworkId = Number(network.rows[0].id);
-  const location = await pool.query(
-    `INSERT INTO locations (name) VALUES ('REGC-LOC1') RETURNING id`
-  );
-  regcLocationId = Number(location.rows[0].id);
   const attendanceSession = await pool.query(
     `INSERT INTO attendance_sessions
-       (course_offering_id, started_by_lecturer_id, attendance_network_id,
-        location_id, start_time, end_time, late_threshold, status)
-     VALUES ($1, $2, $3, $4, now() - interval '15 minutes',
+       (course_offering_id, started_by_lecturer_id, start_time, end_time, late_threshold, status)
+     VALUES ($1, $2, now() - interval '15 minutes',
              now() + interval '45 minutes', interval '5 minutes', 'ACTIVE')
      RETURNING id`,
-    [offeringCSC201, lecturer1ProfileId, regcNetworkId, regcLocationId]
+    [offeringCSC201, lecturer1ProfileId]
   );
   regcAttendanceSessionId = Number(attendanceSession.rows[0].id);
 

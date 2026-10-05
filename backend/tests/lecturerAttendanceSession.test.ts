@@ -46,11 +46,6 @@ let offering2Id = 0;
 let offering3Id = 0;
 let offering4Id = 0;
 
-let network1Id = 0;
-let network2Id = 0;
-let location1Id = 0;
-let location2Id = 0;
-
 const ALL_USER_IDS = () => [
   adminUserId,
   studentUserId,
@@ -91,8 +86,6 @@ async function get(path: string, headers: Record<string, string> = {}) {
 function validCreateBody(): Record<string, unknown> {
   return {
     courseOfferingId: offering1Id,
-    attendanceNetworkId: network1Id,
-    locationId: location1Id,
     durationMinutes: 60,
     lateThresholdMinutes: 5,
   };
@@ -166,8 +159,6 @@ async function cleanupScopedData(): Promise<void> {
   ]);
   await pool.query(`DELETE FROM departments WHERE code LIKE 'LATT%'`);
   await pool.query(`DELETE FROM faculties WHERE code LIKE 'LATT%'`);
-  await pool.query(`DELETE FROM attendance_networks WHERE network_code LIKE 'LATT%'`);
-  await pool.query(`DELETE FROM locations WHERE name LIKE 'LATT-LOC%'`);
 }
 
 async function resetSessionState(): Promise<void> {
@@ -204,12 +195,12 @@ async function insertExpiredActiveSession(
 ): Promise<number> {
   const inserted = await pool.query(
     `INSERT INTO attendance_sessions
-       (course_offering_id, started_by_lecturer_id, attendance_network_id,
-        location_id, start_time, end_time, late_threshold, status)
-     VALUES ($1, $2, $3, $4, now() - interval '2 hours', now() - interval '1 hour',
+       (course_offering_id, started_by_lecturer_id, start_time, end_time,
+        late_threshold, status)
+      VALUES ($1, $2, now() - interval '2 hours', now() - interval '1 hour',
              '0', 'ACTIVE')
      RETURNING id`,
-    [offering1Id, lecturerProfileId, network1Id, location1Id]
+     [offering1Id, lecturerProfileId]
   );
   return Number(inserted.rows[0].id);
 }
@@ -220,10 +211,9 @@ async function insertEndedSession(
 ): Promise<number> {
   const inserted = await pool.query(
     `INSERT INTO attendance_sessions
-       (course_offering_id, started_by_lecturer_id, attendance_network_id,
-        location_id, start_time, end_time, late_threshold, status, ended_at)
-     SELECT course_offering_id, $1, attendance_network_id,
-            location_id, start_time, start_time + interval '30 minutes',
+       (course_offering_id, started_by_lecturer_id, start_time, end_time,
+        late_threshold, status, ended_at)
+      SELECT course_offering_id, $1, start_time, start_time + interval '30 minutes',
             '0', 'ENDED', start_time + interval '30 minutes'
      FROM attendance_sessions WHERE id = $2
      RETURNING id`,
@@ -323,28 +313,6 @@ before(async () => {
     [courseInactiveId, academicSessionId, firstSemesterId]
   );
   offering4Id = Number(offering4.rows[0].id);
-
-  const network1 = await pool.query(
-    `INSERT INTO attendance_networks (network_code, name)
-     VALUES ('LATT-NET1', 'LATT Network One') RETURNING id`
-  );
-  network1Id = Number(network1.rows[0].id);
-
-  const network2 = await pool.query(
-    `INSERT INTO attendance_networks (network_code, name, status)
-     VALUES ('LATT-NET2', 'LATT Network Inactive', 'INACTIVE') RETURNING id`
-  );
-  network2Id = Number(network2.rows[0].id);
-
-  const location1 = await pool.query(
-    `INSERT INTO locations (name) VALUES ('LATT-LOC1') RETURNING id`
-  );
-  location1Id = Number(location1.rows[0].id);
-
-  const location2 = await pool.query(
-    `INSERT INTO locations (name, status) VALUES ('LATT-LOC2', 'INACTIVE') RETURNING id`
-  );
-  location2Id = Number(location2.rows[0].id);
 
   const student = await pool.query(
     `INSERT INTO users (name, password_hash, role, status, username)
@@ -563,8 +531,6 @@ test("invalid request bodies are rejected with 400", async () => {
   const badIds = [
     { ...base, courseOfferingId: 0 },
     { ...base, courseOfferingId: -5 },
-    { ...base, attendanceNetworkId: 0 },
-    { ...base, locationId: "abc" },
     { ...base, courseOfferingId: "not-a-number" },
     { ...base, durationMinutes: undefined },
   ];
@@ -695,54 +661,6 @@ test("lecturer must be assigned to the offering", async () => {
 });
 
 // ---------------------------------------------------------------------------
-// Network / location validation
-// ---------------------------------------------------------------------------
-
-test("attendance network must exist", async () => {
-  const token = await lecturer1Token();
-  const res = await postJson(
-    "/api/lecturer/attendance-sessions",
-    { ...validCreateBody(), attendanceNetworkId: 999999 },
-    cookieHeader(token)
-  );
-  assert.equal(res.status, 404);
-  assertErrorCode(await res.json(), "ATTENDANCE_NETWORK_NOT_FOUND");
-});
-
-test("attendance network must be ACTIVE", async () => {
-  const token = await lecturer1Token();
-  const res = await postJson(
-    "/api/lecturer/attendance-sessions",
-    { ...validCreateBody(), attendanceNetworkId: network2Id },
-    cookieHeader(token)
-  );
-  assert.equal(res.status, 409);
-  assertErrorCode(await res.json(), "ATTENDANCE_NETWORK_INACTIVE");
-});
-
-test("location must exist", async () => {
-  const token = await lecturer1Token();
-  const res = await postJson(
-    "/api/lecturer/attendance-sessions",
-    { ...validCreateBody(), locationId: 999999 },
-    cookieHeader(token)
-  );
-  assert.equal(res.status, 404);
-  assertErrorCode(await res.json(), "LOCATION_NOT_FOUND");
-});
-
-test("location must be ACTIVE", async () => {
-  const token = await lecturer1Token();
-  const res = await postJson(
-    "/api/lecturer/attendance-sessions",
-    { ...validCreateBody(), locationId: location2Id },
-    cookieHeader(token)
-  );
-  assert.equal(res.status, 409);
-  assertErrorCode(await res.json(), "LOCATION_INACTIVE");
-});
-
-// ---------------------------------------------------------------------------
 // Creation
 // ---------------------------------------------------------------------------
 
@@ -753,15 +671,44 @@ test("a valid assigned lecturer can create an attendance session", async () => {
   assert.equal(data.courseOfferingId, offering1Id);
   assert.equal(data.courseCode, "LATT-101");
   assert.equal(data.courseTitle, "LATT Course One");
-  assert.equal(data.attendanceNetworkId, network1Id);
-  assert.equal(data.attendanceNetworkName, "LATT Network One");
-  assert.equal(data.locationId, location1Id);
-  assert.equal(data.locationName, "LATT-LOC1");
+  assert.equal("attendanceNetworkId" in data, false);
+  assert.equal("locationId" in data, false);
   assert.equal(data.lateThresholdMinutes, 5);
   assert.equal(data.status, "ACTIVE");
   assert.equal(data.currentState, "ACTIVE");
   assert.equal(data.endedAt, null);
   assert.equal(typeof data.id, "number");
+});
+
+test("legacy network/location request fields do not affect session creation", async () => {
+  const token = await lecturer1Token();
+  const body = {
+    ...validCreateBody(),
+    attendanceNetworkId: 999999,
+    locationId: -1,
+  };
+  const response = await postJson(
+    "/api/lecturer/attendance-sessions",
+    body,
+    cookieHeader(token)
+  );
+  assert.equal(response.status, 201);
+  const result = (await response.json()) as { data: Record<string, unknown> };
+  assert.equal("attendanceNetworkId" in result.data, false);
+  assert.equal("locationId" in result.data, false);
+});
+
+test("attendance session schema has no network/location columns", async () => {
+  const columns = await pool.query(
+    `SELECT column_name
+     FROM information_schema.columns
+     WHERE table_schema = current_schema()
+       AND table_name = 'attendance_sessions'
+       AND column_name = ANY($1::TEXT[])
+     ORDER BY column_name`,
+    [["attendance_network_id", "location_id"]]
+  );
+  assert.deepEqual(columns.rows, []);
 });
 
 test("server generates start_time and end_time from duration", async () => {

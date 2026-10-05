@@ -3,8 +3,6 @@ import { SessionStatus } from "../types/attendanceSession";
 export interface AdminAttendanceSessionFilters {
   courseOfferingId?: number;
   lecturerId?: number;
-  attendanceNetworkId?: number;
-  locationId?: number;
   academicSessionId?: number;
   semesterId?: number;
   status?: SessionStatus;
@@ -75,18 +73,6 @@ export function parseAdminAttendanceSessionListFilters(
     const v = parsePositiveInteger(obj.lecturerId);
     if (v === null) return null;
     filters.lecturerId = v;
-  }
-
-  if (obj.attendanceNetworkId !== undefined) {
-    const v = parsePositiveInteger(obj.attendanceNetworkId);
-    if (v === null) return null;
-    filters.attendanceNetworkId = v;
-  }
-
-  if (obj.locationId !== undefined) {
-    const v = parsePositiveInteger(obj.locationId);
-    if (v === null) return null;
-    filters.locationId = v;
   }
 
   if (obj.academicSessionId !== undefined) {
