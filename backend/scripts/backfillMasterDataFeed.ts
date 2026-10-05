@@ -31,6 +31,7 @@
 // This prevents accidental execution against a production database.
 import type { PoolClient } from "pg";
 import { join } from "node:path";
+import { inspect } from "node:util";
 import dotenv from "dotenv";
 import type { SyncOperation } from "../src/types/sync";
 import { pool } from "../src/db/pool";
@@ -123,11 +124,92 @@ const EMITTERS: ReadonlyArray<{ table: string; emit: MasterDataEmitter }> = [
   { table: "lecturers", emit: appendLecturerEvent },
 ];
 
+/**
+ * The PostgreSQL server's own fields on a failed query.
+ *
+ * `pg` attaches these to the error object rather than folding them into the
+ * message, and they are usually the whole diagnosis: `code` says what went
+ * wrong, `detail` says which row, and `hint` says what to do about it.
+ */
+type PostgresErrorFields = {
+  code?: string;
+  severity?: string;
+  detail?: string;
+  hint?: string;
+  schema?: string;
+  table?: string;
+  column?: string;
+  dataType?: string;
+  constraint?: string;
+  routine?: string;
+  position?: string;
+  where?: string;
+};
+
+/**
+ * Masks anything credential-shaped before it is printed.
+ *
+ * Connection failures quote the host and port, which is worth keeping because it
+ * is what distinguishes a bad host from a rejected login. But a `DATABASE_URL`
+ * that reached a message would carry the password with it, so the userinfo and
+ * any `password=` pair are replaced.
+ */
+function redact(text: string): string {
+  return text
+    .replace(/(postgres(?:ql)?:\/\/)[^/\s@]*@/gi, "$1[redacted]@")
+    .replace(/(password\s*=\s*)('[^']*'|"[^"]*"|\S+)/gi, "$1[redacted]");
+}
+
+/**
+ * Renders a thrown value as an operator-facing report.
+ *
+ * The first production attempt reported an empty message, because a bare
+ * `error.message` prints nothing at all for a rejection that is not an `Error`,
+ * and throws away the code, detail and hint that identify a PostgreSQL failure.
+ * Everything that can identify the failure is printed; anything that could carry
+ * a credential is redacted first.
+ */
+function describeFailure(error: unknown): string {
+  const pg = error as PostgresErrorFields | undefined;
+
+  const fields: Array<[string, unknown]> =
+    error instanceof Error
+      ? [
+          ["name", error.name],
+          ["message", error.message],
+          ["code", pg?.code],
+          ["severity", pg?.severity],
+          ["detail", pg?.detail],
+          ["hint", pg?.hint],
+          ["schema", pg?.schema],
+          ["table", pg?.table],
+          ["column", pg?.column],
+          ["dataType", pg?.dataType],
+          ["constraint", pg?.constraint],
+          ["routine", pg?.routine],
+          ["position", pg?.position],
+          ["where", pg?.where],
+          ["stack", error.stack],
+        ]
+      : [
+          ["name", "not an Error instance"],
+          ["value", inspect(error)],
+        ];
+
+  const lines = fields
+    .filter(([, value]) => value !== undefined && value !== null && value !== "")
+    .map(([label, value]) => `  ${label}: ${redact(String(value))}`);
+
+  return lines.length > 0 ? lines.join("\n") : "  (no error details available)";
+}
+
 (async () => {
-  const client = await pool.connect();
+  let client: PoolClient | null = null;
   let total = 0;
 
   try {
+    client = await pool.connect();
+
     await client.query("BEGIN");
 
     for (const { table, emit } of EMITTERS) {
@@ -146,13 +228,30 @@ const EMITTERS: ReadonlyArray<{ table: string; emit: MasterDataEmitter }> = [
     await client.query("COMMIT");
     console.log(`Backfilled ${total} master-data events into the sync change feed.`);
   } catch (error) {
-    await client.query("ROLLBACK").catch(() => undefined);
+    // Only a client that actually connected has a transaction to roll back; a
+    // failed `pool.connect()` never opened one.
+    if (client !== null) {
+      await client.query("ROLLBACK").catch((rollbackError: unknown) => {
+        console.error(
+          "ROLLBACK also failed, so the server may already have aborted the transaction:\n" +
+            describeFailure(rollbackError)
+        );
+        return undefined;
+      });
+    }
     throw error;
   } finally {
-    client.release();
-    await pool.end();
+    client?.release();
+    // Cleanup must never replace the failure that got us here, so a pool that
+    // refuses to close is reported and the original error still propagates.
+    await pool.end().catch((poolError: unknown) => {
+      console.error(
+        "Closing the database pool failed:\n" + describeFailure(poolError)
+      );
+      return undefined;
+    });
   }
-})().catch((error) => {
-  console.error("Master-data feed backfill failed:", (error as Error).message);
+})().catch((error: unknown) => {
+  console.error("Master-data feed backfill failed:\n" + describeFailure(error));
   process.exit(1);
 });
