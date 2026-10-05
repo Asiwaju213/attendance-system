@@ -130,6 +130,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     [applySession]
   );
 
+  const changePassword = useCallback(
+    async (
+      currentPassword: string,
+      newPassword: string,
+      confirmPassword: string
+    ) => {
+      await authApi.changeLecturerPassword({ currentPassword, newPassword, confirmPassword });
+      // The backend clears the forced-change flag and revokes the other sessions; re-reading
+      // /auth/me is what lets the app leave the change screen on its own.
+      return refreshCurrentUser();
+    },
+    [refreshCurrentUser]
+  );
+
   const logout = useCallback(async () => {
     try {
       await authApi.logout();
@@ -149,6 +163,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       loginLecturer,
       loginAdmin,
       registerStudent,
+      changePassword,
       refreshCurrentUser,
       logout,
     }),
@@ -160,6 +175,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       loginLecturer,
       loginAdmin,
       registerStudent,
+      changePassword,
       refreshCurrentUser,
       logout
     ]

@@ -5,15 +5,16 @@ import {
   assignOfferingLecturer,
   createCourseOffering,
   listAdminCourses,
-  listAdminLecturers,
   listOfferingLecturers,
   removeOfferingLecturer,
 } from "../api/adminCourses";
+import { listAdminLecturers } from "../api/adminLecturers";
 import { listAcademicSessions, listSemesters } from "../api/academicPeriods";
 import { ApiError } from "../api/client";
 import { listAdminCourseOfferings } from "../api/attendance";
 import { FormError } from "../components/FormError";
-import type { AdminCourse, AdminAssignedLecturer, AdminLecturer } from "../types/adminCourse";
+import type { AdminCourse, AdminAssignedLecturer } from "../types/adminCourse";
+import type { AdminLecturer } from "../types/adminLecturer";
 import type { AcademicSession, Semester } from "../types/academicPeriod";
 import type { AdminCourseOffering, OfferingStatus } from "../types/attendance";
 

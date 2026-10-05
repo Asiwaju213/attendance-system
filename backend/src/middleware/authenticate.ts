@@ -65,6 +65,7 @@ export async function requireAuth(
     }
 
     req.user = user;
+    req.sessionId = session.id;
     updateLastSeen(session.id).catch(() => undefined);
     next();
   } catch (error) {
@@ -109,6 +110,7 @@ export async function loadSessionIfPresent(
     const user = await findActiveUserById(session.user_id);
     if (user) {
       req.user = user;
+      req.sessionId = session.id;
       updateLastSeen(session.id).catch(() => undefined);
     }
     next();

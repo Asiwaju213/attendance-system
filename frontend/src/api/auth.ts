@@ -176,6 +176,24 @@ export async function logout(): Promise<void> {
   await apiRequest<MessageResponse>("/auth/logout", { method: "POST" });
 }
 
+/**
+ * Replace a temporary password with a confirmed new one.
+ *
+ * The backend keeps the current session signed in and revokes every other session of the
+ * account. Call `getCurrentUser` afterwards so the app sees the cleared
+ * `mustChangePassword` flag.
+ */
+export function changeLecturerPassword(input: {
+  currentPassword: string;
+  newPassword: string;
+  confirmPassword: string;
+}): Promise<void> {
+  return apiRequest<MessageResponse>("/auth/change-password", {
+    method: "POST",
+    body: input,
+  }).then(() => undefined);
+}
+
 export interface DeviceBindingResponse {
   hasDeviceBinding: boolean;
   matricNumber?: string;

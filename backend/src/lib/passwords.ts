@@ -1,5 +1,10 @@
 import { argon2id, hash, verify, type HashOptions } from "argon2";
 
+// Password bounds for every credential this system issues or accepts. They match the
+// policy the student self-registration flow already enforces.
+export const MIN_PASSWORD_LENGTH = 8;
+export const MAX_PASSWORD_LENGTH = 200;
+
 const HASH_OPTIONS: HashOptions = { type: argon2id as HashOptions["type"] };
 
 export function hashPassword(password: string): Promise<string> {

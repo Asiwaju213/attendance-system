@@ -23,6 +23,7 @@ interface LoginCandidate {
   username: string | null;
   identifier: string;
   role: string;
+  must_change_password: boolean;
 }
 
 // Look up the account for a given role using its login identifier. Each role
@@ -31,6 +32,7 @@ interface LoginCandidate {
 const CANDIDATE_QUERIES: Record<Role, string> = {
   STUDENT: `
     SELECT u.id, u.name, u.password_hash, u.status, u.username, u.role,
+           u.must_change_password,
            s.matric_number AS identifier
     FROM users u
     JOIN students s ON s.user_id = u.id
@@ -38,6 +40,7 @@ const CANDIDATE_QUERIES: Record<Role, string> = {
     LIMIT 1`,
   LECTURER: `
     SELECT u.id, u.name, u.password_hash, u.status, u.username, u.role,
+           u.must_change_password,
            l.staff_id AS identifier
     FROM users u
     JOIN lecturers l ON l.user_id = u.id
@@ -45,6 +48,7 @@ const CANDIDATE_QUERIES: Record<Role, string> = {
     LIMIT 1`,
   ADMIN: `
     SELECT u.id, u.name, u.password_hash, u.status, u.username, u.role,
+           u.must_change_password,
            u.username AS identifier
     FROM users u
     WHERE u.role = 'ADMIN' AND u.username = $1
@@ -76,6 +80,7 @@ export function toSafeUser(candidate: LoginCandidate): SafeUser {
     username: role === "ADMIN" ? candidate.identifier : null,
     matricNumber: role === "STUDENT" ? candidate.identifier : null,
     staffId: role === "LECTURER" ? candidate.identifier : null,
+    mustChangePassword: candidate.must_change_password === true,
   };
 }
 

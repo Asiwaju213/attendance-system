@@ -22,6 +22,14 @@ export function loginPathForRole(role: Role): string {
   }
 }
 
+/**
+ * Where a lecturer with a pending forced password change has to go.
+ *
+ * The backend refuses every API surface except the password change itself while the account
+ * still owes one, so this is the single page that can succeed during that window.
+ */
+export const changePasswordPath = "/change-password";
+
 export interface AppNavItem {
   label: string;
   href: string;
@@ -47,6 +55,7 @@ export function appNavigationForRole(role: Role): AppNavigation {
         items: [
           { label: "Overview", href: "/app/admin" },
           { label: "Students", href: "/app/admin/students" },
+          { label: "Lecturers", href: "/app/admin/lecturers" },
           { label: "Courses", href: "/app/admin/courses" },
           { label: "Offerings", href: "/app/admin/course-offerings" },
           { label: "Attendance", href: "/app/admin/attendance" },

@@ -6,7 +6,6 @@ import type {
   AdminCourseOfferingCreateInput,
   AdminCourseOfferingUpdateInput,
   AdminCourseUpdateInput,
-  AdminLecturer,
 } from "../types/adminCourse";
 import type { AdminCourseOffering } from "../types/attendance";
 
@@ -31,10 +30,6 @@ export function updateAdminCourse(
     method: "PATCH",
     body: input,
   });
-}
-
-export function listAdminLecturers(): Promise<{ data: AdminLecturer[] }> {
-  return apiRequest("/admin/lecturers");
 }
 
 export function createCourseOffering(

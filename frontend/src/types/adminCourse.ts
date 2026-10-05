@@ -4,6 +4,10 @@ export type CourseStatus = "ACTIVE" | "INACTIVE";
 
 export type OfferingStatus = "OPEN" | "CLOSED";
 
+// The lecturer shape belongs to the lecturer domain; re-exported here so existing
+// course-offering imports keep working from a single source.
+export type { AdminLecturer } from "./adminLecturer";
+
 export interface AdminCourse {
   id: number;
   courseCode: string;
@@ -35,17 +39,6 @@ export interface AdminCourseUpdateInput {
   facultyId?: number;
   departmentId?: number;
   status?: CourseStatus;
-}
-
-export interface AdminLecturer {
-  id: number;
-  userId: number;
-  staffId: string;
-  name: string;
-  departmentId: number;
-  departmentName: string;
-  departmentCode: string;
-  status: "ACTIVE" | "INACTIVE";
 }
 
 export interface AdminAssignedLecturer {

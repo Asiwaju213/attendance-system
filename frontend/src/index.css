@@ -1655,6 +1655,19 @@ textarea {
   font-weight: 600;
 }
 
+/* One-time credential reveal on the admin lecturer page. Monospaced and letter-spaced so a
+   temporary password can be read aloud and typed accurately without being re-fetched. */
+.credential-secret {
+  font-family: var(--font-mono);
+  font-size: 1.05rem;
+  letter-spacing: 0.08em;
+  word-break: break-all;
+  padding: 10px 14px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-input-bg);
+}
+
 .confirm-row--block {
   align-items: flex-start;
   flex-direction: column;

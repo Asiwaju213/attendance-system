@@ -8,8 +8,9 @@ import {
 } from "../config/auth";
 import { hashPassword } from "../lib/passwords";
 import { hashSessionToken } from "../lib/sessions";
-import { getSessionToken, requireAuth, getCookieValue } from "../middleware/authenticate";
+import { getSessionToken, requireAuth, requireLecturer, getCookieValue } from "../middleware/authenticate";
 import { authenticate, findLoginCandidate, verifyPasswordOrDummy, generateSessionToken, createSession, toSafeUser } from "../services/authService";
+import { changeOwnPassword } from "../services/passwordChangeService";
 import {
   completeRegistration,
   verifyRegistration,
@@ -39,6 +40,7 @@ import {
 } from "../services/sessionStore";
 import { Role } from "../types/auth";
 import { parseLoginCredentials } from "../validation/authValidation";
+import { parseChangePasswordBody } from "../validation/passwordChangeValidation";
 import { parseStudentDeviceLoginBody } from "../validation/studentDeviceLoginValidation";
 
 // Parse password from request body (local copy since it's not exported from authValidation).
@@ -282,6 +284,80 @@ router.post("/student/login", async (req: Request, res: Response): Promise<void>
 
 router.post("/lecturer/login", buildLoginHandler("LECTURER", "staffId"));
 router.post("/admin/login", buildLoginHandler("ADMIN", "username"));
+
+/**
+ * POST /api/auth/change-password
+ *
+ * The one endpoint a lecturer who still owes a password change may call. It verifies the
+ * temporary credential, replaces it with the confirmed new password, clears the forced-change
+ * flag and revokes the account's other sessions, all in one transaction.
+ *
+ * Mounted inside this router on purpose: the forced-change guard in `app.ts` runs after the
+ * auth router is matched, so this route, `/api/auth/me` and `/api/auth/logout` stay reachable
+ * while every other API surface is closed to that account.
+ */
+router.post(
+  "/change-password",
+  requireAuth,
+  requireLecturer,
+  async (req: Request, res: Response): Promise<void> => {
+    const input = parseChangePasswordBody(req.body);
+    if (!input) {
+      res.status(400).json({
+        error: "INVALID_REQUEST",
+        message:
+          "Provide your current password, a new password of at least 8 characters, and the new password again to confirm it.",
+      });
+      return;
+    }
+
+    try {
+      const result = await changeOwnPassword(
+        req.user!.id,
+        req.sessionId ?? null,
+        input.currentPassword,
+        input.newPassword
+      );
+      if (result.ok) {
+        res.status(200).json({ message: "Password changed." });
+        return;
+      }
+
+      switch (result.code) {
+        case "CURRENT_PASSWORD_INVALID":
+          res.status(401).json({
+            error: "CURRENT_PASSWORD_INVALID",
+            message: "The current password is incorrect.",
+          });
+          return;
+        case "PASSWORD_UNCHANGED":
+          res.status(400).json({
+            error: "PASSWORD_UNCHANGED",
+            message: "The new password must be different from the current one.",
+          });
+          return;
+        case "PASSWORD_CHANGE_NOT_REQUIRED":
+          res.status(409).json({
+            error: "PASSWORD_CHANGE_NOT_REQUIRED",
+            message: "This account does not have a pending password change.",
+          });
+          return;
+        case "ACCOUNT_NOT_FOUND":
+          res.status(404).json({
+            error: "ACCOUNT_NOT_FOUND",
+            message: "The account could not be found.",
+          });
+          return;
+      }
+    } catch (error) {
+      console.error("Change password error.", (error as Error).message);
+      res.status(500).json({
+        error: "INTERNAL_ERROR",
+        message: "An unexpected error occurred while changing the password.",
+      });
+    }
+  }
+);
 
 // ------------------------------------------------------------------
 // POST /api/auth/student/device/options

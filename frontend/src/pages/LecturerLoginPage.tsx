@@ -5,7 +5,7 @@ import { AuthShell } from "../components/AuthShell";
 import { Field } from "../components/Field";
 import { FormError } from "../components/FormError";
 import { errorMessageForSubmit } from "../app/errors";
-import { homePathForRole } from "../app/navigation";
+import { changePasswordPath, homePathForRole } from "../app/navigation";
 import { useAuth } from "../app/useAuth";
 
 interface FieldErrors {
@@ -43,7 +43,12 @@ export function LecturerLoginPage() {
     setIsSubmitting(true);
     try {
       const user = await loginLecturer(staffId.trim(), password);
-      navigate(homePathForRole(user.role), { replace: true });
+      // A lecturer who signed in with a temporary password goes straight to the forced change;
+      // the backend would refuse every other request until it is done.
+      navigate(
+        user.mustChangePassword ? changePasswordPath : homePathForRole(user.role),
+        { replace: true }
+      );
     } catch (error) {
       setFormError(errorMessageForSubmit(error));
       setIsSubmitting(false);

@@ -17,6 +17,7 @@ import adminStudentDevicesRouter from "./routes/adminStudentDevices";
 import adminStudentsRouter from "./routes/adminStudents";
 import adminSyncStatusRouter from "./routes/adminSyncStatus";
 import authRouter from "./routes/auth";
+import { requirePasswordChangeCleared } from "./middleware/passwordChangeGuard";
 import lecturerAttendanceReportsRouter from "./routes/lecturerAttendanceReports";
 import lecturerAttendanceSessionsRouter from "./routes/lecturerAttendanceSessions";
 import lecturerCatalogRouter from "./routes/lecturerCatalog";
@@ -55,6 +56,12 @@ app.get("/api/health", async (_req, res) => {
 });
 
 app.use("/api/auth", authRouter);
+// Forced password change. Mounted after the auth router and before every role router, so a
+// lecturer who still owes a change can reach exactly `/api/auth/me`,
+// `/api/auth/change-password` and `/api/auth/logout` and nothing else - no admin route, no
+// student route, no lecturer route, whatever the client asks for. Requests without a session
+// cookie (including the machine-to-machine sync transport below) are unaffected.
+app.use(requirePasswordChangeCleared);
 app.use("/api/admin", adminAcademicSessionsRouter);
 app.use("/api/admin", adminSemestersRouter);
 app.use("/api/admin", adminOrganizationRouter);

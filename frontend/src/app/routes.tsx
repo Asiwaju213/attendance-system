@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 import { LoadingPage } from "../components/LoadingPage";
-import { homePathForRole } from "./navigation";
+import { changePasswordPath, homePathForRole, loginPathForRole } from "./navigation";
 import { ProtectedRoute } from "./ProtectedRoute";
 import { useAuth } from "./useAuth";
 import { AdminHomePage } from "../pages/AdminHomePage";
@@ -9,6 +9,7 @@ import { AdminLoginPage } from "../pages/AdminLoginPage";
 import { AdminAttendancePage } from "../pages/AdminAttendancePage";
 import { AdminAttendanceReportsPage } from "../pages/AdminAttendanceReportsPage";
 import { AdminAcademicPeriodsPage } from "../pages/AdminAcademicPeriodsPage";
+import { AdminLecturersPage } from "../pages/AdminLecturersPage";
 import { AdminStudentDevicesPage } from "../pages/AdminStudentDevicesPage";
 import { AdminStudentsPage } from "../pages/AdminStudentsPage";
 import { AdminStudentImportPage } from "../pages/AdminStudentImportPage";
@@ -20,6 +21,7 @@ import { LecturerAttendancePage } from "../pages/LecturerAttendancePage";
 import { LecturerAttendanceReportsPage } from "../pages/LecturerAttendanceReportsPage";
 import { LecturerSessionAttendanceReportPage } from "../pages/LecturerSessionAttendanceReportPage";
 import { LecturerLoginPage } from "../pages/LecturerLoginPage";
+import { LecturerChangePasswordPage } from "../pages/LecturerChangePasswordPage";
 import { NotFoundPage } from "../pages/NotFoundPage";
 import { StaffLoginPage } from "../pages/StaffLoginPage";
 import { StudentHomePage } from "../pages/StudentHomePage";
@@ -79,6 +81,31 @@ function AuthenticatedStudentOnly({ children }: { children: ReactNode }) {
         replace
       />
     );
+  }
+
+  return children;
+}
+
+/**
+ * Guard for the forced password-change page.
+ *
+ * The exact inverse of the `ProtectedRoute` redirect: reachable only by a signed-in lecturer
+ * whose account still owes a password change. Anyone else is sent to their own home page, so
+ * the page never doubles as a general password-change surface for students or admins.
+ */
+function LecturerPasswordChangeOnly({ children }: { children: ReactNode }) {
+  const { status, user } = useAuth();
+
+  if (status === "loading") {
+    return <LoadingPage />;
+  }
+
+  if (status === "unauthenticated" || user === null) {
+    return <Navigate to={loginPathForRole("LECTURER")} replace />;
+  }
+
+  if (user.role !== "LECTURER" || !user.mustChangePassword) {
+    return <Navigate to={homePathForRole(user.role)} replace />;
   }
 
   return children;
@@ -256,6 +283,14 @@ export function AppRoutes() {
           }
         />
         <Route
+          path="/app/admin/lecturers"
+          element={
+            <ProtectedRoute role="ADMIN">
+              <AdminLecturersPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
           path="/app/admin/students"
           element={
             <ProtectedRoute role="ADMIN">
@@ -293,6 +328,21 @@ export function AppRoutes() {
             <ProtectedRoute role="ADMIN">
               <AdminCourseOfferingRosterPage />
             </ProtectedRoute>
+          }
+        />
+        {/*
+          Forced first-login password change.
+
+          Outside `ProtectedRoute` on purpose: the account cannot reach any protected route yet,
+          and the backend rejects every API call except the password change itself while the
+          forced change is pending.
+        */}
+        <Route
+          path={changePasswordPath}
+          element={
+            <LecturerPasswordChangeOnly>
+              <LecturerChangePasswordPage />
+            </LecturerPasswordChangeOnly>
           }
         />
         {/*

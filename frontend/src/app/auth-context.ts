@@ -39,6 +39,18 @@ export interface AuthContextValue {
   loginLecturer: (staffId: string, password: string) => Promise<User>;
   loginAdmin: (username: string, password: string) => Promise<User>;
   registerStudent: (challengeToken: string, password: string) => Promise<User>;
+  /**
+   * Replace the temporary password a lecturer account was created with.
+   *
+   * Re-reads the current user from the server afterwards, so the returned user already carries
+   * the cleared `mustChangePassword` flag and the app can continue into the lecturer dashboard
+   * without a second round trip.
+   */
+  changePassword: (
+    currentPassword: string,
+    newPassword: string,
+    confirmPassword: string
+  ) => Promise<User | null>;
   logout: () => Promise<void>;
 }
 
