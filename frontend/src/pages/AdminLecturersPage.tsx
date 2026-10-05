@@ -15,7 +15,7 @@ const MIN_PASSWORD_LENGTH = 8;
 interface LecturerFormState {
   staffId: string;
   name: string;
-  departmentId: string;
+  departmentId: number | "";
   temporaryPassword: string;
   confirmPassword: string;
 }
@@ -63,9 +63,8 @@ function createErrorMessage(error: unknown): string {
   return "The lecturer account could not be created. Please try again.";
 }
 
-function isPositiveId(value: string): boolean {
-  const parsed = Number(value);
-  return Number.isInteger(parsed) && parsed >= 1;
+function isPositiveId(value: number | ""): boolean {
+  return typeof value === "number" && Number.isInteger(value) && value >= 1;
 }
 
 export function AdminLecturersPage() {
@@ -158,12 +157,24 @@ export function AdminLecturersPage() {
       return;
     }
 
+    // The department list and the request carry the same identity, so a selection that is no longer
+    // in the loaded list is a stale page rather than a bad department. Catch it here, where the
+    // reload can be offered, instead of letting the API answer "no such department".
+    const departmentId = draft.departmentId as number;
+    if (!departments.some((department) => department.id === departmentId)) {
+      setFieldErrors({
+        departmentId: "That department is no longer in the list. Reload and select it again.",
+      });
+      refreshList();
+      return;
+    }
+
     setIsCreating(true);
     try {
       const created = await createAdminLecturer({
         staffId: draft.staffId.trim(),
         name: draft.name.trim(),
-        departmentId: Number(draft.departmentId),
+        departmentId,
         temporaryPassword: draft.temporaryPassword,
       });
 
@@ -408,9 +419,15 @@ export function AdminLecturersPage() {
               id={departmentFieldId}
               className="field__input"
               value={draft.departmentId}
-              onChange={(event) =>
-                setDraft((current) => ({ ...current, departmentId: event.target.value }))
-              }
+              onChange={(event) => {
+                // A <select> hands back a string. Convert once, here at the DOM boundary, so the
+                // id the form submits is the number the departments API returned.
+                const selected = event.target.value;
+                setDraft((current) => ({
+                  ...current,
+                  departmentId: selected === "" ? "" : Number(selected),
+                }));
+              }}
               aria-invalid={fieldErrors.departmentId !== undefined || undefined}
             >
               <option value="">Select a department</option>

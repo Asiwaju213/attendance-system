@@ -1,4 +1,8 @@
 import { MAX_PASSWORD_LENGTH, MIN_PASSWORD_LENGTH } from "../lib/passwords";
+// The department id is parsed exactly as the department administration, student and course-offering
+// endpoints parse it, so a `<select>` value reaches this endpoint in the same shape it does
+// everywhere else instead of being rejected over its JSON type.
+import { parseIdParam } from "./adminOrgValidation";
 
 const MAX_STAFF_ID_LENGTH = 50;
 const MAX_NAME_LENGTH = 200;
@@ -66,15 +70,8 @@ export function parseCreateLecturer(body: unknown): CreateLecturerInput | null {
   const staffId = parseTrimmedString(obj.staffId, MAX_STAFF_ID_LENGTH);
   const name = parseTrimmedString(obj.name, MAX_NAME_LENGTH);
   const temporaryPassword = parsePassword(obj.temporaryPassword);
-  const departmentId = obj.departmentId;
-  if (
-    !staffId ||
-    !name ||
-    !temporaryPassword ||
-    typeof departmentId !== "number" ||
-    !Number.isInteger(departmentId) ||
-    departmentId < 1
-  ) {
+  const departmentId = parseIdParam(obj.departmentId);
+  if (!staffId || !name || !temporaryPassword || departmentId === null) {
     return null;
   }
 

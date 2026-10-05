@@ -287,6 +287,103 @@ test("creating a lecturer requires an admin session", async () => {
   assert.equal(asStudent.status, 403);
 });
 
+test("a department listed by the admin departments API can be used to create a lecturer", async () => {
+  const adminToken = await adminSessionToken();
+
+  // Take the department straight from the endpoint that populates the admin dropdown, exactly as
+  // the browser does. This is the contract the create form depends on: the id the admin selects is
+  // the id the create endpoint must accept.
+  const listRes = await getJson("/api/admin/departments", cookieHeader(adminToken));
+  assert.equal(listRes.status, 200);
+  const listBody = (await listRes.json()) as { data: Array<Record<string, unknown>> };
+  const listed = listBody.data.find((entry) => entry.code === "CPE");
+  assert.ok(listed, "expected the seeded CPE department to be listed");
+
+  const listedId = listed?.id;
+  assert.equal(typeof listedId, "number", "the listed department id must be a JSON number");
+  assert.ok(Number.isInteger(listedId as number) && (listedId as number) > 0);
+
+  const staffId = `${CREATED_STAFF_PREFIX}LISTED`;
+  const res = await postJson(
+    "/api/admin/lecturers",
+    {
+      staffId,
+      name: `${CREATED_NAME_PREFIX}Listed`,
+      departmentId: listedId,
+      temporaryPassword: CREATED_TEMP_PASSWORD,
+    },
+    cookieHeader(adminToken)
+  );
+  assert.equal(res.status, 201);
+  const body = (await res.json()) as { data: Record<string, unknown> };
+  assert.equal(body.data.departmentId, listedId);
+  assert.equal(body.data.departmentCode, "CPE");
+
+  const stored = await createdLecturerUser(staffId);
+  const profile = await pool.query(`SELECT department_id FROM lecturers WHERE staff_id = $1`, [
+    staffId,
+  ]);
+  assert.equal(Number(profile.rows[0].department_id), listedId);
+  assert.ok(stored.id > 0);
+});
+
+test("a department id sent as a digit string is the same department as the number", async () => {
+  // A <select> value is a string, and every other admin endpoint (departments, students, course
+  // offerings) normalizes it through `parseIdParam`. Lecturer creation must accept the identical
+  // id rather than failing on its JSON type.
+  const adminToken = await adminSessionToken();
+  const listRes = await getJson("/api/admin/departments", cookieHeader(adminToken));
+  const listBody = (await listRes.json()) as { data: Array<Record<string, unknown>> };
+  const listed = listBody.data.find((entry) => entry.code === "CPE");
+  assert.ok(listed);
+  const listedId = Number(listed?.id);
+
+  const staffId = `${CREATED_STAFF_PREFIX}STRINGID`;
+  const res = await postJson(
+    "/api/admin/lecturers",
+    {
+      staffId,
+      name: `${CREATED_NAME_PREFIX}StringId`,
+      departmentId: String(listedId),
+      temporaryPassword: CREATED_TEMP_PASSWORD,
+    },
+    cookieHeader(adminToken)
+  );
+  assert.equal(res.status, 201);
+  const body = (await res.json()) as { data: Record<string, unknown> };
+  assert.equal(body.data.departmentId, listedId);
+
+  const profile = await pool.query(`SELECT department_id FROM lecturers WHERE staff_id = $1`, [
+    staffId,
+  ]);
+  assert.equal(Number(profile.rows[0].department_id), listedId);
+});
+
+test("a department id that is not a positive integer is still rejected", async () => {
+  const adminToken = await adminSessionToken();
+  const payload = {
+    staffId: `${CREATED_STAFF_PREFIX}BADID`,
+    name: `${CREATED_NAME_PREFIX}BadId`,
+    temporaryPassword: CREATED_TEMP_PASSWORD,
+  };
+
+  for (const departmentId of ["not-a-number", "12abc", "", -1, 0, 1.5, null, true, {}]) {
+    const res = await postJson(
+      "/api/admin/lecturers",
+      { ...payload, departmentId },
+      cookieHeader(adminToken)
+    );
+    assert.equal(res.status, 400, `expected 400 for departmentId ${JSON.stringify(departmentId)}`);
+    assert.equal((await assertJson(res)).error, "INVALID_REQUEST");
+  }
+
+  const orphans = await pool.query(
+    `SELECT count(*)::int AS count FROM lecturers WHERE staff_id = $1`,
+    [`${CREATED_STAFF_PREFIX}BADID`]
+  );
+  assert.equal(orphans.rows[0].count, 0);
+});
+
 test("a created lecturer gets an ACTIVE LECTURER account with a forced change and an argon2id hash", async () => {
   const adminToken = await adminSessionToken();
   const res = await createLecturerViaApi(adminToken, {
