@@ -2,11 +2,13 @@ import assert from "node:assert/strict";
 import type { Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { after, before, test } from "node:test";
+import type { PoolClient } from "pg";
 import { app } from "../src/app";
 import { authConfig } from "../src/config/auth";
 import { pool } from "../src/db/pool";
 import { hashPassword } from "../src/lib/passwords";
 import { hashSessionToken } from "../src/lib/sessions";
+import { resetStudentRegistration } from "../src/services/adminStudentStore";
 import {
   boundDeviceHeaders,
   deviceBindingHeader,
@@ -1051,6 +1053,71 @@ test("ASM reset: two concurrent resets yield exactly one success", async () => {
     [resetConcurrencyTarget.userId]
   );
   assert.equal(audit.rows[0].n, 1, "exactly one audit entry must survive the race");
+});
+
+test("ASM reset: does not acquire a second pool connection during its transaction", async () => {
+  // Production connects through a connection string (DATABASE_URL set), where the
+  // default pool size is 1. The reset holds that only client inside its
+  // transaction, so the admin-name lookup must run on the same client; if it
+  // asked the pool for a second connection the checkout would time out
+  // ("timeout exceeded when trying to connect"). This instruments the pool to
+  // fail such an acquisition and drives the service directly.
+  const created = await pool.query(
+    `INSERT INTO users (name, password_hash, role, status)
+     VALUES ($1, $2, 'STUDENT', 'ACTIVE') RETURNING id`,
+    [`ASM Reset NoSecondConn ${RUN_ID}`, passwordHash]
+  );
+  const userId = Number(created.rows[0].id);
+  const profile = await pool.query(
+    `INSERT INTO students (user_id, matric_number, department_id, level_id)
+     VALUES ($1, $2, $3, $4) RETURNING id`,
+    [userId, `ASM/STU/NO2CONN-${RUN_ID}`, departmentAId, level100Id]
+  );
+  const profileId = Number(profile.rows[0].id);
+
+  type Instrumented = {
+    connect: (...args: unknown[]) => Promise<PoolClient>;
+    query: (...args: unknown[]) => unknown;
+  };
+  const instrumented = pool as unknown as Instrumented;
+  const originalConnect = instrumented.connect.bind(pool);
+  const originalQuery = instrumented.query.bind(pool);
+  let checkedOut = 0;
+
+  try {
+    instrumented.connect = async (...args: unknown[]) => {
+      const client = await originalConnect(...args);
+      checkedOut += 1;
+      const originalRelease = client.release.bind(client);
+      client.release = () => {
+        checkedOut -= 1;
+        originalRelease();
+      };
+      return client;
+    };
+    instrumented.query = async (...args: unknown[]) => {
+      if (checkedOut > 0) {
+        throw new Error(
+          "pool.query was called while the reset transaction held the only client"
+        );
+      }
+      return originalQuery(...args);
+    };
+
+    const result = await resetStudentRegistration(adminUserId, profileId);
+    assert.equal(result.ok, true, "the reset must succeed with a single connection");
+    assert.equal(checkedOut, 0, "the transaction client must be released afterwards");
+  } finally {
+    instrumented.connect = originalConnect;
+    instrumented.query = originalQuery;
+  }
+
+  const row = await pool.query(
+    `SELECT status, password_hash FROM users WHERE id = $1`,
+    [userId]
+  );
+  assert.equal(row.rows[0].status, "PENDING");
+  assert.equal(row.rows[0].password_hash, null);
 });
 
 test("ASM reset: never exposes secrets in the response", async () => {

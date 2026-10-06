@@ -1,5 +1,5 @@
 import { pool } from "../db/pool";
-import type { PoolClient } from "pg";
+import type { Pool, PoolClient } from "pg";
 import {
   AdminStudentDetail,
   AdminStudentDevice,
@@ -25,6 +25,13 @@ export type ResetStudentRegistrationResult =
     };
 
 type StudentRow = Record<string, unknown>;
+
+/**
+ * Where a query may run. Pool-based callers default to the shared `pool`; a
+ * transaction may pass its checked-out `PoolClient` so the work runs on the
+ * already-held connection instead of requesting a second one from the pool.
+ */
+type QueryExecutor = Pick<Pool, "query"> | PoolClient;
 
 const STUDENT_FROM = `
   FROM students s
@@ -221,8 +228,11 @@ export async function getAdminStudentDetail(
   };
 }
 
-async function findAdminName(adminUserId: number): Promise<string | null> {
-  const result = await pool.query(
+async function findAdminName(
+  adminUserId: number,
+  exec: QueryExecutor = pool
+): Promise<string | null> {
+  const result = await exec.query(
     `SELECT name FROM users WHERE id = $1 AND role = 'ADMIN' LIMIT 1`,
     [adminUserId]
   );
@@ -239,7 +249,7 @@ export async function updateStudentStatus(
   try {
     await client.query("BEGIN");
 
-    const adminName = await findAdminName(adminUserId);
+    const adminName = await findAdminName(adminUserId, client);
 
     // Lock the target user row so concurrent status changes (or registration
     // resets) serialize on the same row and never race on stale status values.
@@ -336,7 +346,7 @@ export async function resetStudentRegistration(
     client = await pool.connect();
     await client.query("BEGIN");
 
-    const adminName = await findAdminName(adminUserId);
+    const adminName = await findAdminName(adminUserId, client);
 
     // Lock the target user row: the status transition (ACTIVE -> PENDING) and
     // the challenge expirations all happen in this one serialized transaction,
