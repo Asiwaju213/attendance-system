@@ -29,6 +29,12 @@
  * fails at startup instead, so a typo is loud rather than quietly permissive.
  */
 
+// Loads config/env, which runs dotenv.config(). The process-wide value below is resolved when
+// this module is first evaluated, so the dependency on dotenv has to be declared here: relying on
+// the importer's order is what let app.ts pull config/access in before ./db/pool (the module that
+// pulls in config/env), so .env was read only after the mode had already been fixed to `cloud`.
+import "./env";
+
 export const STUDENT_ACCESS_MODES = ["cloud", "edge"] as const;
 
 export type StudentAccessMode = (typeof STUDENT_ACCESS_MODES)[number];
@@ -92,9 +98,10 @@ export function resolveStudentAccessConfig(
 /**
  * The value resolved once for this process, from the environment.
  *
- * Read at import time, so config/env.ts (and therefore dotenv) must already have run. app.ts
- * imports this module only after ./db/pool has pulled in config/env, which is the same ordering
- * index.ts relies on for HOST and PORT.
+ * Read at import time, which is why this module imports config/env above: dotenv must have run
+ * before this line executes, whatever the order the rest of the application imports in. The same
+ * value feeds both the startup log in index.ts and the Express setting app.ts installs, so the
+ * log and the middleware can never disagree.
  */
 export const studentAccessConfig: StudentAccessConfig = resolveStudentAccessConfig(process.env);
 

@@ -1,4 +1,5 @@
 import { pool } from "../db/pool";
+import type { PoolClient } from "pg";
 import {
   AdminStudentDetail,
   AdminStudentDevice,
@@ -330,8 +331,9 @@ export async function resetStudentRegistration(
   adminUserId: number,
   studentId: number
 ): Promise<ResetStudentRegistrationResult> {
-  const client = await pool.connect();
+  let client: PoolClient | null = null;
   try {
+    client = await pool.connect();
     await client.query("BEGIN");
 
     const adminName = await findAdminName(adminUserId);
@@ -421,9 +423,13 @@ export async function resetStudentRegistration(
       },
     };
   } catch (error) {
-    await client.query("ROLLBACK").catch(() => undefined);
+    if (client !== null) {
+      await client.query("ROLLBACK").catch(() => undefined);
+    }
     throw error;
   } finally {
-    client.release();
+    if (client !== null) {
+      client.release();
+    }
   }
 }
