@@ -398,15 +398,43 @@ export async function resetStudentRegistration(
       [row.user_id]
     );
 
-    // Expire any outstanding device-enrollment challenges. The existing active
-    // WebAuthn device is intentionally NOT revoked in this slice (policy
-    // decision deferred); it is left untouched.
+    // Expire any outstanding device-enrollment challenges so a stale challenge
+    // cannot later be spent by anyone.
     await client.query(
       `UPDATE student_device_enrollment_challenges
        SET status = 'EXPIRED', consumed_at = now()
        WHERE student_id = $1 AND status = 'ACTIVE'`,
       [row.student_id]
     );
+
+    // Revoke the student's ACTIVE device in the same transaction so a single
+    // "Reset registration" action fully releases the account for fresh
+    // enrollment on a new phone. The partial unique index
+    // `one_active_device_per_student` guarantees at most one ACTIVE row, so
+    // this can only touch that device; historical REVOKED rows are untouched,
+    // and a student with no ACTIVE device simply gets a no-op that still lets
+    // the reset succeed.
+    const revokedDevice = await client.query(
+      `UPDATE student_devices
+       SET status = 'REVOKED', revoked_at = now(), updated_at = now()
+       WHERE student_id = $1 AND status = 'ACTIVE'
+       RETURNING id`,
+      [row.student_id]
+    );
+    if ((revokedDevice.rowCount ?? 0) > 0) {
+      // Reuse the established device-reset audit action so device-revocation
+      // history stays queryable under the same action, with the description
+      // making clear the revocation happened as part of the registration reset.
+      await client.query(
+        `INSERT INTO audit_logs (user_id, action, entity_type, entity_id, description)
+         VALUES ($1, 'STUDENT_DEVICE_RESET', 'student_devices', $2, $3)`,
+        [
+          adminUserId,
+          Number(revokedDevice.rows[0].id),
+          `Admin ${adminName ?? `(id ${adminUserId})`} reset registration for student ${row.matric_number} (${row.name}); the active device was revoked together with the registration reset; previous status ACTIVE.`,
+        ]
+      );
+    }
 
     await client.query(
       `INSERT INTO audit_logs (user_id, action, entity_type, entity_id, description)

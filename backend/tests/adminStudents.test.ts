@@ -970,17 +970,31 @@ test("ASM reset: active registration and device-enrollment challenges are expire
   assert.ok(dev.rows[0].consumed_at);
 });
 
-test("ASM reset: the active WebAuthn device is NOT revoked", async () => {
+test("ASM reset: the ACTIVE WebAuthn device is REVOKED during the reset", async () => {
   const devices = await pool.query(
     `SELECT status, revoked_at FROM student_devices
      WHERE student_id = $1`,
     [resetTarget.profileId]
   );
-  assert.equal(devices.rows[0].status, "ACTIVE", "device must stay ACTIVE");
-  assert.equal(devices.rows[0].revoked_at, null);
+  assert.equal(devices.rows[0].status, "REVOKED");
+  assert.ok(
+    devices.rows[0].revoked_at !== null,
+    "revoked_at must be populated on the revoked device"
+  );
+
+  const registrations = await pool.query(
+    `SELECT count(*)::int AS n FROM course_registrations
+     WHERE student_id = $1 AND status = 'ENROLLED'`,
+    [resetTarget.profileId]
+  );
+  assert.equal(
+    registrations.rows[0].n,
+    1,
+    "course enrollment history must survive the registration reset"
+  );
 });
 
-test("ASM reset: writes a STUDENT_REGISTRATION_RESET audit log", async () => {
+test("ASM reset: writes registration-reset AND device-reset audit logs", async () => {
   const audit = await pool.query(
     `SELECT user_id, action, entity_type, entity_id, description
      FROM audit_logs
@@ -995,6 +1009,30 @@ test("ASM reset: writes a STUDENT_REGISTRATION_RESET audit log", async () => {
   assert.ok(description.includes(resetTarget.matric));
   assert.ok(description.includes("ASM Reset Target"));
   assert.ok(description.includes("ACTIVE"));
+
+  const deviceAudit = await pool.query(
+    `SELECT user_id, action, entity_type, entity_id, description
+     FROM audit_logs
+     WHERE action = 'STUDENT_DEVICE_RESET'
+       AND entity_type = 'student_devices'
+       AND entity_id IN (SELECT id FROM student_devices WHERE student_id = $1)`,
+    [resetTarget.profileId]
+  );
+  assert.equal(
+    deviceAudit.rowCount,
+    1,
+    "the device revocation must be recorded as a device reset"
+  );
+  assert.equal(Number(deviceAudit.rows[0].user_id), adminUserId);
+  const deviceDescription = deviceAudit.rows[0].description as string;
+  assert.ok(
+    deviceDescription.includes(resetTarget.matric),
+    "the device audit must name the student"
+  );
+  assert.ok(
+    deviceDescription.includes("registration reset"),
+    "the device audit must show it was part of the registration reset"
+  );
 });
 
 test("ASM reset: an already-PENDING student gets a conflict and is untouched", async () => {
@@ -1120,6 +1158,105 @@ test("ASM reset: does not acquire a second pool connection during its transactio
   assert.equal(row.rows[0].password_hash, null);
 });
 
+test("ASM reset: succeeds with no ACTIVE device and leaves REVOKED history untouched", async () => {
+  const created = await pool.query(
+    `INSERT INTO users (name, password_hash, role, status)
+     VALUES ($1, $2, 'STUDENT', 'ACTIVE') RETURNING id`,
+    [`ASM Reset NoDevice ${RUN_ID}`, passwordHash]
+  );
+  const userId = Number(created.rows[0].id);
+  const profile = await pool.query(
+    `INSERT INTO students (user_id, matric_number, department_id, level_id)
+     VALUES ($1, $2, $3, $4) RETURNING id`,
+    [userId, `ASM/STU/NODEV-${RUN_ID}`, departmentAId, level100Id]
+  );
+  const profileId = Number(profile.rows[0].id);
+  const oldRevokedAt = new Date(Date.UTC(2026, 8, 25, 0, 0, 0, 0));
+  await pool.query(
+    `INSERT INTO student_devices
+       (student_id, credential_id, credential_public_key, counter, cred_type, discoverable, status, revoked_at)
+     VALUES ($1, $2, $3, 0, 'public-key', TRUE, 'REVOKED', $4)`,
+    [profileId, `asm-nod-${RUN_ID}`, Buffer.from([0xa0, 0x01]), oldRevokedAt]
+  );
+
+  const result = await resetStudentRegistration(adminUserId, profileId);
+  assert.equal(result.ok, true, "a reset with no ACTIVE device must still succeed");
+
+  const user = await pool.query(
+    `SELECT status, password_hash FROM users WHERE id = $1`,
+    [userId]
+  );
+  assert.equal(user.rows[0].status, "PENDING");
+  assert.equal(user.rows[0].password_hash, null);
+
+  const devices = await pool.query(
+    `SELECT status, revoked_at FROM student_devices WHERE student_id = $1`,
+    [profileId]
+  );
+  assert.equal(devices.rows.length, 1, "no new device row may be created");
+  assert.equal(devices.rows[0].status, "REVOKED");
+  assert.equal(
+    (devices.rows[0].revoked_at as Date).getTime(),
+    oldRevokedAt.getTime(),
+    "an existing REVOKED device must remain untouched"
+  );
+});
+
+test("ASM reset: a mid-transaction failure rolls back the status change and the device revocation", async () => {
+  const created = await pool.query(
+    `INSERT INTO users (name, password_hash, role, status)
+     VALUES ($1, $2, 'STUDENT', 'ACTIVE') RETURNING id`,
+    [`ASM Reset Rollback ${RUN_ID}`, passwordHash]
+  );
+  const userId = Number(created.rows[0].id);
+  const profile = await pool.query(
+    `INSERT INTO students (user_id, matric_number, department_id, level_id)
+     VALUES ($1, $2, $3, $4) RETURNING id`,
+    [userId, `ASM/STU/ROLLBACK-${RUN_ID}`, departmentAId, level100Id]
+  );
+  const profileId = Number(profile.rows[0].id);
+  await pool.query(
+    `INSERT INTO student_devices
+       (student_id, credential_id, credential_public_key, counter, cred_type, discoverable, status)
+     VALUES ($1, $2, $3, 0, 'public-key', TRUE, 'ACTIVE')`,
+    [profileId, `asm-rb-${RUN_ID}`, Buffer.from([0xa0, 0x01])]
+  );
+
+  await assert.rejects(
+    () => resetStudentRegistration(999999999, profileId),
+    (error: unknown) =>
+      typeof error === "object" &&
+      error !== null &&
+      (error as { code?: unknown }).code === "23503"
+  );
+
+  const user = await pool.query(
+    `SELECT status, password_hash FROM users WHERE id = $1`,
+    [userId]
+  );
+  assert.equal(user.rows[0].status, "ACTIVE", "rollback must keep the user active");
+  assert.ok(
+    user.rows[0].password_hash !== null,
+    "rollback must keep the password hash"
+  );
+
+  const devices = await pool.query(
+    `SELECT status, revoked_at FROM student_devices WHERE student_id = $1`,
+    [profileId]
+  );
+  assert.equal(devices.rows[0].status, "ACTIVE", "rollback must keep the device active");
+  assert.equal(devices.rows[0].revoked_at, null);
+
+  const audits = await pool.query(
+    `SELECT count(*)::int AS n FROM audit_logs
+     WHERE (action = 'STUDENT_REGISTRATION_RESET' AND entity_id = $1)
+        OR (action = 'STUDENT_DEVICE_RESET'
+            AND entity_id IN (SELECT id FROM student_devices WHERE student_id = $2))`,
+    [userId, profileId]
+  );
+  assert.equal(audits.rows[0].n, 0, "no audit row may survive a rolled-back reset");
+});
+
 test("ASM reset: never exposes secrets in the response", async () => {
   const smuggleRes = await resetViaApi(resetSecretsTarget.profileId);
   assert.equal(smuggleRes.status, 200);
@@ -1157,7 +1294,7 @@ test("ASM reset: client-supplied identity fields cannot override the route ident
 // Lifecycle: reset -> re-register -> login
 // -----------------------------------------------------------------------
 
-test("ASM lifecycle: reset -> PENDING -> reject login -> re-register -> ACTIVE on the same device", async () => {
+test("ASM lifecycle: reset revokes the device; an unbound login then starts fresh enrollment", async () => {
   const staleCredentialId = await ensureActiveDiscoverableDevice(lifecycleTarget.matric);
   const beforeLogin = await postJson(
     "/api/auth/student/login",
@@ -1172,9 +1309,8 @@ test("ASM lifecycle: reset -> PENDING -> reject login -> re-register -> ACTIVE o
   const reset = await resetViaApi(lifecycleTarget.profileId);
   assert.equal(reset.status, 200);
 
-  // The reset returns the account to PENDING, so the enrolled device can no longer be used to
-  // sign in. The revoked credential id is reused deliberately: asking the shared helper for an
-  // ACTIVE device here would silently create a fresh one and hide the regression.
+  // The reset now returns the account to PENDING AND revokes its ACTIVE device, so the credential
+  // can neither sign in directly (stale binding) nor gate unbound logins (no ACTIVE device remains).
   const staleDeviceLogin = await postJson(
     "/api/auth/student/login",
     {
@@ -1186,14 +1322,14 @@ test("ASM lifecycle: reset -> PENDING -> reject login -> re-register -> ACTIVE o
   assert.notEqual(
     staleDeviceLogin.status,
     200,
-    "the revoked device must not be able to log in after a reset"
+    "the revoked credential must not be able to log in after a reset"
   );
 
   const rejectedLogin = await postJson("/api/auth/student/login", {
     matricNumber: lifecycleTarget.matric,
     password: TEST_PASSWORD,
   });
-  assert.equal(rejectedLogin.status, 401, "the reset student cannot log in");
+  assert.equal(rejectedLogin.status, 401, "the reset student cannot log in while PENDING");
 
   const verify = await postJson("/api/auth/student/register/verify", {
     matricNumber: lifecycleTarget.matric,
@@ -1218,32 +1354,36 @@ test("ASM lifecycle: reset -> PENDING -> reject login -> re-register -> ACTIVE o
     "the new password hash must be set"
   );
 
-  const newLogin = await postJson(
-    "/api/auth/student/login",
-    {
-      matricNumber: lifecycleTarget.matric,
-      password: NEW_PASSWORD,
-    },
-    deviceBindingHeader(staleCredentialId)
-  );
-  assert.equal(newLogin.status, 200, "the new password must work on the enrolled device");
-  const newLoginBody = (await newLogin.json()) as { user: Record<string, unknown> };
-  assert.equal(newLoginBody.user.matricNumber, lifecycleTarget.matric);
-
-  // A registration reset returns the account to the unclaimed state; it is not a device reset.
-  // The enrolled device therefore stays authoritative, and re-registering must not become a way
-  // to mint a session from a different device.
-  const unboundAfterReregister = await postJson("/api/auth/student/login", {
+  // With no ACTIVE device left after the reset, the first password-only login from an unbound
+  // phone must enter the enrollment ceremony: it issues an enrollment grant instead of a session,
+  // and instead of the DEVICE_ALREADY_ENROLLED refusal the old ("not a device reset") contract
+  // produced.
+  const unboundLogin = await postJson("/api/auth/student/login", {
     matricNumber: lifecycleTarget.matric,
     password: NEW_PASSWORD,
   });
+  assert.equal(unboundLogin.status, 200);
+  const unboundBody = (await unboundLogin.json()) as {
+    enrollmentRequired?: boolean;
+    user?: Record<string, unknown>;
+  };
   assert.equal(
-    unboundAfterReregister.status,
-    409,
-    "re-registering must not bypass the enrolled device"
+    unboundBody.enrollmentRequired,
+    true,
+    "an unbound login after a device-revoking reset must start WebAuthn enrollment"
   );
-  const unboundBody = (await unboundAfterReregister.json()) as { error: string };
-  assert.equal(unboundBody.error, "DEVICE_ALREADY_ENROLLED");
+  assert.equal(
+    unboundBody.user,
+    undefined,
+    "no session may be minted before enrollment on the new phone"
+  );
+
+  const grant = await pool.query(
+    `SELECT status FROM student_device_enrollment_grants
+     WHERE student_id = $1 AND status = 'ACTIVE'`,
+    [lifecycleTarget.profileId]
+  );
+  assert.equal(grant.rowCount, 1, "the unbound login must mint an active enrollment grant");
 
   const oldLogin = await postJson("/api/auth/student/login", {
     matricNumber: lifecycleTarget.matric,
