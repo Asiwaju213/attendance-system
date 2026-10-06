@@ -1,5 +1,4 @@
 import { Request, Response, Router } from "express";
-import { appendFileSync } from "node:fs";
 import { requireAdmin, requireAuth } from "../middleware/authenticate";
 import {
   getAdminStudentDetail,
@@ -172,16 +171,6 @@ router.post(
         table: err.table ?? null,
       });
       console.error("Admin students reset error.", summary, err.stack ?? "(no stack)");
-      // TEMP-DIAGNOSTIC: persist the underlying error so it can be inspected;
-      // removed once the root cause is captured.
-      try {
-        appendFileSync(
-          process.cwd() + "/reset-error.debug.log",
-          `${new Date().toISOString()} ${summary} stack=${err.stack ?? "(no stack)"}\n`
-        );
-      } catch {
-        // Diagnostics logging must never break the response path.
-      }
       res.status(500).json({
         error: "INTERNAL_ERROR",
         message: "An unexpected error occurred while resetting the student registration.",
