@@ -78,6 +78,15 @@ interface NaturalKey {
   /** Bound values, when the key columns are cloud-supplied scalars. */
   values?: unknown[];
   /**
+   * Bound values for `expressions`, in placeholder order.
+   *
+   * Used only when `expressions` is set (a business key resolved by SQL
+   * expressions rather than bound scalars). Each expression's placeholders
+   * consume these in order, continuing after the UPDATE statement's own SET
+   * parameters, so `expressions` and `expressionValues` must have equal length.
+   */
+  expressionValues?: unknown[];
+  /**
    * SQL expressions yielding the key values instead of bound parameters.
    *
    * Needed for `course_offerings`, whose business key is a tuple of LOCAL integer
@@ -168,6 +177,18 @@ async function upsertMirrored(
 
     if (key.expressions) {
       keyOperand = key.expressions.join(", ");
+      if (
+        !key.expressionValues ||
+        key.expressionValues.length !== key.expressions.length
+      ) {
+        throw new SyncApplyError(
+          `Natural key for ${spec.table} uses ${key.expressions.length} ` +
+            `expressions but carries ${
+              key.expressionValues?.length ?? 0
+            } bound values.`
+        );
+      }
+      params.push(...key.expressionValues);
     } else {
       for (const value of key.values ?? []) {
         params.push(value);
@@ -401,23 +422,27 @@ async function applyCourseOffering(
   client: PoolClient,
   payload: SyncedCourseOffering
 ): Promise<void> {
+  const courseRef = requireParentRef(
+    "course_offering",
+    "cloudCourseSyncId",
+    payload.cloudCourseSyncId
+  );
+  const academicSessionRef = requireParentRef(
+    "course_offering",
+    "cloudAcademicSessionSyncId",
+    payload.cloudAcademicSessionSyncId
+  );
+  const semesterRef = requireParentRef(
+    "course_offering",
+    "cloudSemesterSyncId",
+    payload.cloudSemesterSyncId
+  );
+
   const values = [
     payload.syncId,
-    requireParentRef(
-      "course_offering",
-      "cloudCourseSyncId",
-      payload.cloudCourseSyncId
-    ),
-    requireParentRef(
-      "course_offering",
-      "cloudAcademicSessionSyncId",
-      payload.cloudAcademicSessionSyncId
-    ),
-    requireParentRef(
-      "course_offering",
-      "cloudSemesterSyncId",
-      payload.cloudSemesterSyncId
-    ),
+    courseRef,
+    academicSessionRef,
+    semesterRef,
     payload.status,
   ];
 
@@ -437,7 +462,8 @@ async function applyCourseOffering(
     setValues: values,
     // The business key is the (course, academic session, semester) triple, and
     // its values are LOCAL ids, so they are resolved from the cloud UUIDs rather
-    // than bound directly. Placeholders $6-$8 continue after the five above.
+    // than bound directly. Placeholders $6-$8 continue after the five above and
+    // are bound to the same three parent UUIDs as the SET clause.
     naturalKey: {
       columns: ["course_id", "academic_session_id", "semester_id"],
       expressions: [
@@ -445,6 +471,7 @@ async function applyCourseOffering(
         parent("academic_sessions", 7),
         parent("semesters", 8),
       ],
+      expressionValues: [courseRef, academicSessionRef, semesterRef],
     },
   });
 }

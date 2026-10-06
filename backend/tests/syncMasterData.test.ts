@@ -6,13 +6,14 @@ import {
   seedMasterDataGraph,
 } from "./syncTestFixtures";
 import assert from "node:assert/strict";
+import { randomUUID } from "node:crypto";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { after, before, beforeEach, test } from "node:test";
 import { pool } from "../src/db/pool";
 import { listChangeEventsSince } from "../src/services/syncChangeEventStore";
 import { applyChangeBatch, readCursor } from "../src/services/syncApplyService";
-import type { SyncChangeEvent } from "../src/types/sync";
+import type { SyncChangeEvent, SyncEntityType, SyncOperation } from "../src/types/sync";
 
 /**
  * Task 2: cloud -> local master data.
@@ -43,6 +44,7 @@ before(async () => {
   const ourEntityIds = new Set([
     graph.facultySyncId,
     graph.departmentSyncId,
+    graph.levelSyncId,
     graph.courseSyncId,
     graph.academicSessionSyncId,
     graph.semesterSyncId,
@@ -295,6 +297,162 @@ test("the edge writes master data into its own tables, resolving parents by UUID
   assert.equal(offering.rows[0].status, "OPEN");
 });
 
+test("a course_offering whose edge copy carries a different sync_id is adopted by natural key", async () => {
+  // This scenario is why the byKey path exists at all: an edge can already hold
+  // the SAME (course, academic session, semester) tuple under a DIFFERENT
+  // `sync_id` - e.g. the reference rows seeded by migrations 001/004/008 each
+  // side separately, which migration 013 then gives independent defaults.
+  //
+  // A dedicated consumer keeps this test order-independent: it never collides
+  // with the shared consumer's cursor, and it is self-contained because parents
+  // are created by the same batch they are referenced from. Events start at
+  // cursor 1 from a fresh cursor of 0.
+  const BYKEY_CONSUMER = "test-k12-master-data-edge-bykey";
+  const cursor = await readCursor(BYKEY_CONSUMER);
+
+  const cloud = {
+    faculty: randomUUID(),
+    department: randomUUID(),
+    level: randomUUID(),
+    course: randomUUID(),
+    academicSession: randomUUID(),
+    semester: randomUUID(),
+    offering: randomUUID(),
+  };
+
+  let nextCursor = cursor;
+  const event = (
+    entityType: SyncEntityType,
+    entityId: string,
+    operation: SyncOperation,
+    payload: unknown
+  ): SyncChangeEvent => ({
+    eventId: randomUUID(),
+    cursor: ++nextCursor,
+    entityType,
+    entityId,
+    operation,
+    payload: payload as SyncChangeEvent["payload"],
+    recordedAt: new Date().toISOString(),
+  });
+
+  const batch: SyncChangeEvent[] = [
+    event("faculty", cloud.faculty, "CREATED", {
+      version: 1,
+      syncId: cloud.faculty,
+      cloudFacultyId: 9001,
+      name: `${SYNC_TEST_PREFIX} ByKey Faculty`,
+      code: `${SYNC_TEST_PREFIX}-FAC-BYKEY`,
+      status: "ACTIVE",
+    }),
+    event("department", cloud.department, "CREATED", {
+      version: 1,
+      syncId: cloud.department,
+      cloudDepartmentId: 9002,
+      name: `${SYNC_TEST_PREFIX} ByKey Department`,
+      code: `${SYNC_TEST_PREFIX}-DEPT-BYKEY`,
+      status: "ACTIVE",
+      cloudFacultySyncId: cloud.faculty,
+    }),
+    event("level", cloud.level, "CREATED", {
+      version: 1,
+      syncId: cloud.level,
+      name: 200,
+    }),
+    event("course", cloud.course, "CREATED", {
+      version: 1,
+      syncId: cloud.course,
+      cloudCourseId: 9003,
+      courseCode: `${SYNC_TEST_PREFIX}-CRS-BYKEY`,
+      title: `${SYNC_TEST_PREFIX} ByKey Course`,
+      status: "ACTIVE",
+      cloudDepartmentSyncId: cloud.department,
+      cloudFacultySyncId: null,
+      cloudLevelSyncId: cloud.level,
+    }),
+    event("academic_session", cloud.academicSession, "CREATED", {
+      version: 1,
+      syncId: cloud.academicSession,
+      cloudAcademicSessionId: 9004,
+      name: `${SYNC_TEST_PREFIX}-ACAD-BYKEY`,
+      isActive: true,
+    }),
+    event("semester", cloud.semester, "CREATED", {
+      version: 1,
+      syncId: cloud.semester,
+      cloudSemesterId: 1,
+      name: "First Semester",
+    }),
+    event("course_offering", cloud.offering, "CREATED", {
+      version: 1,
+      syncId: cloud.offering,
+      cloudCourseOfferingId: 9005,
+      status: "OPEN",
+      cloudCourseSyncId: cloud.course,
+      cloudAcademicSessionSyncId: cloud.academicSession,
+      cloudSemesterSyncId: cloud.semester,
+    }),
+  ];
+
+  const first = await applyChangeBatch(BYKEY_CONSUMER, batch);
+  assert.equal(first.applied, batch.length);
+  assert.equal(first.cursor, batch[batch.length - 1].cursor);
+
+  const local = await pool.query(
+    `SELECT id, course_id, academic_session_id, semester_id
+     FROM course_offerings WHERE sync_id = $1`,
+    [cloud.offering]
+  );
+  assert.equal(local.rowCount, 1);
+  const offeringId = Number(local.rows[0].id);
+
+  // The edge copy of the same offering now carries a different sync_id than the
+  // cloud's identity for it. The next event must be adopted onto the existing
+  // row by its natural key instead of being re-inserted.
+  await pool.query(`UPDATE course_offerings SET sync_id = $1 WHERE id = $2`, [
+    randomUUID(),
+    offeringId,
+  ]);
+
+  const applied = await applyChangeBatch(BYKEY_CONSUMER, [
+    event("course_offering", cloud.offering, "UPDATED", {
+      version: 1,
+      syncId: cloud.offering,
+      cloudCourseOfferingId: 9005,
+      status: "CLOSED",
+      cloudCourseSyncId: cloud.course,
+      cloudAcademicSessionSyncId: cloud.academicSession,
+      cloudSemesterSyncId: cloud.semester,
+    }),
+  ]);
+  assert.equal(applied.applied, 1);
+  assert.equal(applied.cursor, first.cursor + 1);
+
+  const adopted = await pool.query(
+    `SELECT sync_id, status FROM course_offerings WHERE id = $1`,
+    [offeringId]
+  );
+  assert.equal(
+    adopted.rows[0].sync_id,
+    cloud.offering,
+    "the existing edge copy must adopt the cloud identity by natural key"
+  );
+  assert.equal(adopted.rows[0].status, "CLOSED");
+
+  const count = await pool.query(
+    `SELECT count(*)::int AS n FROM course_offerings
+     WHERE course_id = $1 AND academic_session_id = $2 AND semester_id = $3`,
+    [local.rows[0].course_id, local.rows[0].academic_session_id, local.rows[0].semester_id]
+  );
+  assert.equal(count.rows[0].n, 1, "adoption must not duplicate the offering");
+
+  assert.equal(
+    await readCursor(BYKEY_CONSUMER),
+    first.cursor + 1,
+    "the cursor must advance past the adopted event"
+  );
+});
+
 test("the retired location and attendance_network tables no longer exist", async () => {
   // Migration 018 dropped both. They existed only to populate the session
   // columns migration 017 removed, so nothing should recreate them.
@@ -310,6 +468,10 @@ test("the retired location and attendance_network tables no longer exist", async
 
 test("the edge stores lecturers in the projection and never in users", async () => {
   await readCursor(CONSUMER_ID);
+  await pool.query(
+    `UPDATE sync_consumer_state SET last_cursor = $1 WHERE consumer_id = $2`,
+    [events[0].cursor - 1, CONSUMER_ID]
+  );
   await applyChangeBatch(CONSUMER_ID, events);
 
   const lecturer = await pool.query(
@@ -337,6 +499,10 @@ test("the edge stores lecturers in the projection and never in users", async () 
 
 test("re-applying the same master-data events is idempotent", async () => {
   await readCursor(CONSUMER_ID);
+  await pool.query(
+    `UPDATE sync_consumer_state SET last_cursor = $1 WHERE consumer_id = $2`,
+    [events[0].cursor - 1, CONSUMER_ID]
+  );
   const first = await applyChangeBatch(CONSUMER_ID, events);
   assert.equal(first.applied, events.length);
 
@@ -348,8 +514,8 @@ test("re-applying the same master-data events is idempotent", async () => {
   // Rewind the cursor so the identical batch is offered a second time; the
   // receipts must absorb it.
   await pool.query(
-    `UPDATE sync_consumer_state SET last_cursor = 0 WHERE consumer_id = $1`,
-    [CONSUMER_ID]
+    `UPDATE sync_consumer_state SET last_cursor = $1 WHERE consumer_id = $2`,
+    [events[0].cursor - 1, CONSUMER_ID]
   );
   await pool.query(`DELETE FROM sync_processed_events WHERE consumer_id = $1`, [
     CONSUMER_ID,
@@ -394,6 +560,10 @@ test("a child event whose parent is absent stops the cursor instead of dangling"
   };
 
   await readCursor(CONSUMER_ID);
+  await pool.query(
+    `UPDATE sync_consumer_state SET last_cursor = 0 WHERE consumer_id = $1`,
+    [CONSUMER_ID]
+  );
   await assert.rejects(
     () => applyChangeBatch(CONSUMER_ID, [orphan]),
     (error: unknown) => {

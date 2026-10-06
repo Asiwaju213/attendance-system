@@ -165,7 +165,7 @@ export async function seedMasterDataGraph(): Promise<{
   );
   
   const { createOffering } = await import("../src/services/courseOfferingStore");
-  const { appendSemesterEvent } = await import(
+  const { appendLevelEvent, appendSemesterEvent } = await import(
     "../src/services/syncMasterDataEmitters"
   );
 
@@ -193,6 +193,22 @@ export async function seedMasterDataGraph(): Promise<{
   const level = await pool.query(`SELECT id, sync_id FROM levels WHERE name = 100`);
   const levelId = Number(level.rows[0].id);
   const levelSyncId = level.rows[0].sync_id as string;
+
+  // No runtime path creates a level, so there is no CREATED event to observe for
+  // one. Publishing the existing row directly, exactly like the semester below,
+  // keeps the "parent before child" ordering test meaningful for the course that
+  // references this level.
+  const levelClient = await pool.connect();
+  try {
+    await levelClient.query("BEGIN");
+    await appendLevelEvent(levelClient, "UPDATED", levelId);
+    await levelClient.query("COMMIT");
+  } catch (error) {
+    await levelClient.query("ROLLBACK").catch(() => undefined);
+    throw error;
+  } finally {
+    levelClient.release();
+  }
 
   const academicSession = await createAcademicSession({
     name: unique("MACAD"),
@@ -296,8 +312,8 @@ export async function seedMasterDataGraph(): Promise<{
     semesterSyncId,
     courseOfferingId: offering.data.id,
     courseOfferingSyncId: await syncId("course_offerings", offering.data.id),
-    lecturerId: lecturerId.id,
-    lecturerSyncId: lecturerId.sync_id as string,
+    lecturerId,
+    lecturerSyncId,
   };
 }
 
@@ -313,7 +329,7 @@ export async function cleanupSyncTestFixtures(): Promise<void> {
   await pool.query(
     `DELETE FROM sync_change_events e
      WHERE NOT EXISTS (
-       SELECT 1 FROM attendance_sessions s WHERE s.sync_id = e.entity_id
+       SELECT 1 FROM attendance_sessions s WHERE s.sync_id::text = e.entity_id
      )`
   );
   await pool.query(`DELETE FROM sync_lecturers`);
@@ -333,6 +349,7 @@ export async function cleanupSyncTestFixtures(): Promise<void> {
        SELECT co.id FROM course_offerings co
        JOIN courses c ON c.id = co.course_id
        WHERE c.course_code LIKE '${SYNC_TEST_PREFIX}-CRS-%'
+          OR c.course_code LIKE '${SYNC_TEST_PREFIX}-MCRS-%'
      )`
   );
 
@@ -342,12 +359,14 @@ export async function cleanupSyncTestFixtures(): Promise<void> {
        SELECT co.id FROM course_offerings co
        JOIN courses c ON c.id = co.course_id
        WHERE c.course_code LIKE '${SYNC_TEST_PREFIX}-CRS-%'
+          OR c.course_code LIKE '${SYNC_TEST_PREFIX}-MCRS-%'
      )`
   );
 
   await pool.query(
     `DELETE FROM course_offerings
-     WHERE course_id IN (SELECT id FROM courses WHERE course_code LIKE '${SYNC_TEST_PREFIX}-CRS-%')`
+     WHERE course_id IN (SELECT id FROM courses WHERE course_code LIKE '${SYNC_TEST_PREFIX}-CRS-%'
+                         OR course_code LIKE '${SYNC_TEST_PREFIX}-MCRS-%')`
   );
   await pool.query(
     `DELETE FROM courses WHERE course_code LIKE '${SYNC_TEST_PREFIX}-CRS-%'
