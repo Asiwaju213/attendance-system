@@ -1,14 +1,19 @@
 /**
  * Deployment-mode configuration for student access.
  *
- * The same backend build runs in two places, and only one of them is allowed to serve students:
+ * The same backend build runs in two places, and they split the student surface:
  *
- *   cloud (Render)   the public deployment. It is reachable from the open Internet through the
- *                    Vercel rewrite, so a student could sign in and use attendance from anywhere
- *                    in the world. Students are disabled here.
+ *   cloud (Render)   the public deployment, reachable from the open Internet through the Vercel
+ *                    rewrite. Only account setup is served here: a newly registered student can
+ *                    complete course registration and WebAuthn device enrollment, but can never
+ *                    sign in or mark attendance from anywhere in the world.
  *
  *   edge (K12 PC)    the authoritative entry point for students, on the campus router's own
- *                    network. Students are enabled here.
+ *                    network. The full student surface is served here: sign-in, attendance and
+ *                    every other student API.
+ *
+ * The split - which web routes the cloud may and may not serve - is enforced by
+ * middleware/studentAccess.ts, which holds the cloud allowlists.
  *
  * This is an explicit operator decision recorded as one environment variable, not something the
  * server infers from a request:
@@ -25,8 +30,8 @@
  *     (config/server.ts), and both deployments bind 0.0.0.0, so they cannot tell them apart.
  *
  * Unset means `cloud`: fail closed. A variable that is missing, misspelled or left at its default
- * must never be the thing that exposes student attendance to the Internet. An unrecognized value
- * fails at startup instead, so a typo is loud rather than quietly permissive.
+ * must never be the thing that exposes student sign-in or attendance to the Internet. An
+ * unrecognized value fails at startup instead, so a typo is loud rather than quietly permissive.
  */
 
 // Loads config/env, which runs dotenv.config(). The process-wide value below is resolved when
@@ -122,7 +127,8 @@ export function describeStudentAccessConfig(config: StudentAccessConfig): string
   }
   return (
     `Student access is DISABLED: this is a cloud/provider deployment, so student sign-in and ` +
-    `student APIs are refused. Set ${STUDENT_ACCESS_MODE_ENV_VAR}=edge on the K12 edge PC to ` +
-    `serve students.`
+    `attendance are refused. Account setup stays available here for newly registered students ` +
+    `(course registration and device enrollment). Set ${STUDENT_ACCESS_MODE_ENV_VAR}=edge on the ` +
+    `K12 edge PC to serve the full student surface.`
   );
 }

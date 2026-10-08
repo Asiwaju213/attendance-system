@@ -23,7 +23,12 @@ import { createSession, revokeSession } from "../src/services/sessionStore";
 import { boundDeviceHeaders } from "./studentSessionTestHelpers";
 
 /**
- * The student access policy: students are served by the K12 edge deployment and by nothing else.
+ * The student access policy: the split of student surfaces between the two deployments.
+ *
+ *   cloud  - account setup only. Student registration, course registration and WebAuthn device
+ *            enrollment are served. Sign-in (including device login/bootstrap), remembered-account,
+ *            device-binding and attendance are refused.
+ *   edge   - the full student surface, unchanged.
  *
  * The accounts below are the seeded E2E users, so this file creates no fixtures and has nothing to
  * clean up except the sessions it mints (revoked in `after`). A student session is created
@@ -271,18 +276,40 @@ test("cloud mode refuses device-bound student login too", async () => {
   assert.equal((await res.json()).error, STUDENT_ACCESS_DISABLED);
 });
 
-test("cloud mode refuses the student WebAuthn device endpoints without touching them", async () => {
-  for (const path of ["/api/auth/student/device/options", "/api/auth/student/device/verify"]) {
+test("cloud mode refuses the student device-login endpoints without touching them", async () => {
+  for (const path of [
+    "/api/auth/student/device/options",
+    "/api/auth/student/device/verify",
+    "/api/auth/student/device/bootstrap",
+  ]) {
     const res = await post(cloudUrl, path, {});
     assert.equal(res.status, 403, `${path} must be refused`);
     assert.equal((await res.json()).error, STUDENT_ACCESS_DISABLED);
   }
 });
 
-test("cloud mode refuses student registration, remembered-account and device-binding endpoints", async () => {
+test("cloud mode lets student account registration reach the registration service", async () => {
+  // The seeded student is already ACTIVE, so verify finds no pending registration and the route's
+  // own service answers 404. A policy refusal would answer 403 with STUDENT_ACCESS_DISABLED; the
+  // route's own error is what proves the request got through.
+  const verify = await post(cloudUrl, "/api/auth/student/register/verify", {
+    matricNumber: STUDENT_MATRIC,
+  });
+  assert.equal(verify.status, 404, "verify must reach the registration service");
+  assert.equal((await verify.json()).error, "STUDENT_NOT_FOUND");
+
+  // A well-formed challenge that does not exist answers INVALID_REGISTRATION_CHALLENGE from the
+  // service, not 403 from the policy.
+  const complete = await post(cloudUrl, "/api/auth/student/register/complete", {
+    challengeToken: "no-such-registration-challenge",
+    password: "password1",
+  });
+  assert.equal(complete.status, 400, "complete must reach the registration service");
+  assert.equal((await complete.json()).error, "INVALID_REGISTRATION_CHALLENGE");
+});
+
+test("cloud mode still refuses the remembered-account and device-binding endpoints", async () => {
   const cases: Array<[string, string]> = [
-    ["POST", "/api/auth/student/register/verify"],
-    ["POST", "/api/auth/student/register/complete"],
     ["GET", "/api/auth/student/remembered"],
     ["POST", "/api/auth/student/remembered/clear"],
     ["GET", "/api/auth/student/device-binding"],
@@ -295,35 +322,59 @@ test("cloud mode refuses student registration, remembered-account and device-bin
   }
 });
 
-test("cloud mode refuses every student API route, including anonymous callers", async () => {
-  const paths = [
-    "/api/student/attendance/eligible",
-    "/api/student/attendance/device-challenge",
-    "/api/student/attendance/history",
-    "/api/student/device",
-    "/api/student/course-registrations",
+test("cloud mode refuses the attendance API surface, including anonymous callers", async () => {
+  const cases: Array<[string, string]> = [
+    ["GET", "/api/student/attendance/eligible"],
+    ["POST", "/api/student/attendance/device-challenge"],
+    ["GET", "/api/student/attendance/history"],
+    ["POST", "/api/student/attendance"],
   ];
 
-  for (const path of paths) {
-    const res = await get(cloudUrl, path);
-    assert.equal(res.status, 403, `${path} must be refused in cloud mode`);
+  for (const [method, path] of cases) {
+    const res = await request(cloudUrl, method, path, method === "POST" ? {} : undefined);
+    assert.equal(res.status, 403, `${method} ${path} must be refused in cloud mode`);
     assert.equal((await res.json()).error, STUDENT_ACCESS_DISABLED);
   }
 });
 
-test("cloud mode blocks a student session that already exists", async () => {
+test("cloud mode lets anonymous course-registration and device calls reach route auth", async () => {
+  // These surfaces are allowed through the policy on the cloud, so without a session the router's
+  // own auth answers 401 UNAUTHENTICATED - not the policy's 403.
+  const cases: Array<[string, string]> = [
+    ["GET", "/api/student/registration/courses"],
+    ["GET", "/api/student/course-registrations"],
+    ["GET", "/api/student/device"],
+    ["POST", "/api/student/device/enrollment/options"],
+    ["POST", "/api/student/device/enrollment/complete"],
+  ];
+
+  for (const [method, path] of cases) {
+    const res = await request(cloudUrl, method, path, method === "POST" ? {} : undefined);
+    assert.equal(res.status, 401, `${method} ${path} must reach route auth in cloud mode`);
+    assert.equal((await res.json()).error, "UNAUTHENTICATED");
+  }
+});
+
+test("cloud mode serves course registration and device enrollment for an existing student session", async () => {
+  const headers = await studentSession();
+  const me = await get(cloudUrl, "/api/auth/me", headers);
+  assert.equal(me.status, 200, "the session itself is still valid");
+
+  for (const path of ["/api/student/registration/courses", "/api/student/course-registrations"]) {
+    const res = await get(cloudUrl, path, headers);
+    assert.equal(res.status, 200, `${path} must be served for an existing student session`);
+  }
+
+  const device = await get(cloudUrl, "/api/student/device", headers);
+  assert.equal(device.status, 200, "device status must be served for an existing student session");
+});
+
+test("cloud mode still blocks an existing student session from the attendance APIs", async () => {
   // The case a login-only check misses: a valid session cookie, minted on the edge or before this
   // policy existed, presented straight to the student APIs on the public deployment.
   const headers = await studentSession();
 
-  const me = await get(cloudUrl, "/api/auth/me", headers);
-  assert.equal(me.status, 200, "the session itself is still valid");
-
-  for (const path of [
-    "/api/student/attendance/eligible",
-    "/api/student/attendance/history",
-    "/api/student/course-registrations",
-  ]) {
+  for (const path of ["/api/student/attendance/eligible", "/api/student/attendance/history"]) {
     const res = await get(cloudUrl, path, headers);
     assert.equal(res.status, 403, `${path} must be refused for an existing student session`);
     assert.equal((await res.json()).error, STUDENT_ACCESS_DISABLED);
@@ -331,7 +382,26 @@ test("cloud mode blocks a student session that already exists", async () => {
 
   // And the same session works on the edge, so the block is the policy and not a dead session.
   const edgeRes = await get(edgeUrl, "/api/student/attendance/eligible", headers);
-  assert.notEqual(edgeRes.status, 403, "the same session must work in edge mode");
+  assert.equal(edgeRes.status, 200, "the same session must work in edge mode");
+});
+
+test("cloud mode refuses student routes that are not on the cloud allowlists", async () => {
+  // The allowlists are fail-closed: a student route added after the policy exists - or an
+  // attendance-shaped, login-shaped or registration-shaped route never put on the allowlists -
+  // defaults to 403 on the public deployment until it is allowed on purpose.
+  const cases: Array<[string, string]> = [
+    ["POST", "/api/auth/student/unknown-endpoint"],
+    ["GET", "/api/student/unknown-surface"],
+    ["GET", "/api/student/attendance-archive"],
+    ["POST", "/api/student/attendance/audit"],
+    ["POST", "/api/auth/student/register/archive"],
+  ];
+
+  for (const [method, path] of cases) {
+    const res = await request(cloudUrl, method, path, method === "POST" ? {} : undefined);
+    assert.equal(res.status, 403, `${method} ${path} must be refused in cloud mode`);
+    assert.equal((await res.json()).error, STUDENT_ACCESS_DISABLED);
+  }
 });
 
 test("cloud mode leaves lecturer and admin sign-in and their APIs alone", async () => {
@@ -350,7 +420,7 @@ test("cloud mode leaves lecturer and admin sign-in and their APIs alone", async 
   assert.equal((await admin.json()).user.role, "ADMIN");
 
   const lecturerHeaders = await lecturerSession();
-  const lecturerCatalog = await get(cloudUrl, "/api/lecturer/attendance-networks", lecturerHeaders);
+  const lecturerCatalog = await get(cloudUrl, "/api/lecturer/course-offerings", lecturerHeaders);
   assert.equal(lecturerCatalog.status, 200);
 
   const adminHeaders = await adminSession();
@@ -405,8 +475,8 @@ test("edge mode keeps a student session working", async () => {
 });
 
 test("edge mode keeps lecturer and admin access working", async () => {
-  const lecturer = await get(edgeUrl, "/api/lecturer/catalog", await lecturerSession());
-  assert.notEqual(lecturer.status, 403);
+  const lecturer = await get(edgeUrl, "/api/lecturer/course-offerings", await lecturerSession());
+  assert.equal(lecturer.status, 200);
 
   const admin = await get(edgeUrl, "/api/admin/departments", await adminSession());
   assert.equal(admin.status, 200);
