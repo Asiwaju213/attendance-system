@@ -87,6 +87,11 @@ export function AppShell({ children }: { children: ReactNode }) {
   const navigation = appNavigationForRole(role);
   const home = homePathForRole(role);
 
+  // Student sub-pages are a focused, single-task experience on the shell's mobile chrome: the
+  // dashboard is the only student page that offers the global navigation menu or a logout action.
+  const isFocusedStudentSubpage =
+    role === "STUDENT" && location.pathname !== home;
+
   function isActive(href: string): boolean {
     const pathname = location.pathname;
     if (pathname === href) {
@@ -116,7 +121,13 @@ export function AppShell({ children }: { children: ReactNode }) {
       <a className="skip-link" href="#main-content">
         Skip to main content
       </a>
-      <div className="app-shell">
+      <div
+        className={
+          isFocusedStudentSubpage
+            ? "app-shell app-shell--student-focus"
+            : "app-shell"
+        }
+      >
         <aside className="app-sidebar">
           <Link to={home} className="app-sidebar__brand">
             <span className="app-sidebar__crest">OOU</span>
@@ -141,18 +152,20 @@ export function AppShell({ children }: { children: ReactNode }) {
               <span className="app-sidebar__crest">OOU</span>
               <span>Attendance</span>
             </Link>
-            <button
-              type="button"
-              className="app-topbar__toggle"
-              aria-expanded={menuOpen}
-              aria-controls="app-mobilenav"
-              onClick={() => setMenuOpen((open) => !open)}
-            >
-              {menuOpen ? "Close" : "Menu"}
-            </button>
+            {!isFocusedStudentSubpage ? (
+              <button
+                type="button"
+                className="app-topbar__toggle"
+                aria-expanded={menuOpen}
+                aria-controls="app-mobilenav"
+                onClick={() => setMenuOpen((open) => !open)}
+              >
+                {menuOpen ? "Close" : "Menu"}
+              </button>
+            ) : null}
           </header>
 
-          {menuOpen ? (
+          {!isFocusedStudentSubpage && menuOpen ? (
             <div className="app-mobilenav" id="app-mobilenav">
               <AppNav items={navigation.items} isActive={isActive} />
               <AppAccount

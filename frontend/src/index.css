@@ -2286,6 +2286,15 @@ textarea {
   .app-shell__content {
     padding: 24px 20px 56px;
   }
+
+  /* Student sub-pages are navigation-free on mobile by design (see AppShell's "student-focus"
+     mode): only the student dashboard offers the global menu or a logout action. The page's own
+     "Log out" button is the only logout left on these screens, so hide it while keeping the
+     page-specific "Home" link and all in-page workflow buttons. Desktop keeps the sidebar Sign
+     out and the page header as before. */
+  .app-shell--student-focus .app-header__nav .secondary-button {
+    display: none;
+  }
 }
 
 .student-home {
