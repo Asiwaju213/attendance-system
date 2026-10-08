@@ -11,6 +11,7 @@ import {
   StudentImportPreviewData,
   StudentImportResultData,
 } from "../types/studentImport";
+import { appendStudentEvent } from "./syncMasterDataEmitters";
 
 export type ImportErrorCode =
   | "DEPARTMENT_NOT_FOUND"
@@ -214,9 +215,10 @@ export async function confirmImport(
          RETURNING id`,
         [row.studentName]
       );
-      await client.query(
+      const studentResult = await client.query(
         `INSERT INTO students (user_id, matric_number, department_id, level_id)
-         VALUES ($1, $2, $3, $4)`,
+         VALUES ($1, $2, $3, $4)
+         RETURNING id`,
         [
           Number(userResult.rows[0].id),
           row.matricNumber,
@@ -224,6 +226,13 @@ export async function confirmImport(
           preview.levelId,
         ]
       );
+
+      // Published on the same client, inside this import's transaction, so the
+      // students and their change events commit together or not at all - the
+      // guarantee every other synchronized store already has. One event per
+      // student rather than one per batch: the feed carries one entity per
+      // event, and the edge's idempotency is per event, not per batch.
+      await appendStudentEvent(client, "CREATED", Number(studentResult.rows[0].id));
     }
 
     await client.query(

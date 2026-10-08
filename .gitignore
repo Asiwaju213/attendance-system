@@ -37,6 +37,11 @@ coverage/
 /blob-report/
 /playwright/.cache/
 
+# Local TLS certificate files and private keys
+*.pem
+*.key
+*.crt
+
 # Misc
 *.tgz
 .cache/

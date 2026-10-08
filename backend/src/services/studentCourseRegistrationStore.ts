@@ -8,6 +8,7 @@ import {
   StudentOfferingCourse,
   StudentRegistrationsPayload,
 } from "../types/studentCourseRegistration";
+import { appendCourseRegistrationEvent } from "./syncMasterDataEmitters";
 
 export type StudentCourseErrorCode =
   | "STUDENT_NOT_FOUND"
@@ -400,6 +401,15 @@ export async function registerCourses(
       );
       const item = toCourseRef(offeringById.get(offeringId)!);
       if ((inserted.rowCount ?? 0) > 0) {
+        // Published on the same client, before the same COMMIT: a registration
+        // that commits always reaches the feed, and one that rolls back leaves
+        // no event behind. `alreadyRegistered` rows emit nothing - the edge
+        // already holds whatever produced them.
+        await appendCourseRegistrationEvent(
+          client,
+          "CREATED",
+          Number(inserted.rows[0].id)
+        );
         registered.push(item);
       } else {
         alreadyRegistered.push(item);

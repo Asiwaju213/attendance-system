@@ -44,6 +44,9 @@ export interface DevServerEnvironment {
   VITE_DEV_HOST?: string | undefined;
   VITE_DEV_PORT?: string | undefined;
   VITE_API_PROXY_TARGET?: string | undefined;
+  VITE_DEV_HTTPS?: string | undefined;
+  VITE_HTTPS_CERT_PATH?: string | undefined;
+  VITE_HTTPS_KEY_PATH?: string | undefined;
 }
 
 export interface DevServerConfig {
@@ -53,6 +56,10 @@ export interface DevServerConfig {
   apiProxyTarget: string;
   /** Whether a device on the local network can load the dev server. */
   allowsLanAccess: boolean;
+  https?: {
+    cert: string;
+    key: string;
+  } | undefined;
 }
 
 function configuredValue(value: string | undefined): string | undefined {
@@ -143,6 +150,33 @@ function resolveApiProxyTarget(value: string | undefined): string {
   return url.origin;
 }
 
+function resolveHttpsEnabled(value: string | undefined): boolean {
+  const raw = configuredValue(value);
+  if (raw === undefined) {
+    return false;
+  }
+
+  const normalized = raw.toLowerCase();
+  if (["true", "1", "yes", "on"].includes(normalized)) {
+    return true;
+  }
+  if (["false", "0", "no", "off"].includes(normalized)) {
+    return false;
+  }
+
+  throw new Error(
+    `Invalid value for VITE_DEV_HTTPS: "${value}". Use true or false.`
+  );
+}
+
+function resolveHttpsCertificatePath(value: string | undefined, name: string): string {
+  const path = configuredValue(value);
+  if (path === undefined) {
+    throw new Error(`HTTPS is enabled, but ${name} is not set.`);
+  }
+  return path;
+}
+
 export function isLoopbackHost(host: string): boolean {
   return LOOPBACK_HOSTS.has(host.toLowerCase());
 }
@@ -151,11 +185,20 @@ export function resolveDevServerConfig(
   env: DevServerEnvironment = {}
 ): DevServerConfig {
   const host = resolveHost(env.VITE_DEV_HOST);
+  const httpsEnabled = resolveHttpsEnabled(env.VITE_DEV_HTTPS);
+  const https = httpsEnabled
+    ? {
+        cert: resolveHttpsCertificatePath(env.VITE_HTTPS_CERT_PATH, "VITE_HTTPS_CERT_PATH"),
+        key: resolveHttpsCertificatePath(env.VITE_HTTPS_KEY_PATH, "VITE_HTTPS_KEY_PATH"),
+      }
+    : undefined;
+
   return {
     host,
     port: resolvePort(env.VITE_DEV_PORT),
     strictPort: true,
     apiProxyTarget: resolveApiProxyTarget(env.VITE_API_PROXY_TARGET),
     allowsLanAccess: !isLoopbackHost(host),
+    https,
   };
 }

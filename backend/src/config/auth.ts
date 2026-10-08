@@ -8,6 +8,12 @@ const DEVICE_BINDING_MS = DEVICE_BINDING_DAYS * 24 * 60 * 60 * 1000;
 // A second, independent ceiling (`expires_at` in the database) applies even if a client ignores
 // the cookie's max-age.
 const ENROLLMENT_GRANT_MS = 10 * 60 * 1000;
+// The bootstrap secret is minted when the enrollment commits and spent when the
+// student first binds the browser on the K12 edge. An hour comfortably covers
+// that trip while keeping the window in which a leaked secret is spendable
+// short. Like the enrollment grant, the database row carries its own `expires_at`
+// ceiling, so the value is enforced server-side regardless of any client.
+const DEVICE_BOOTSTRAP_LIFETIME_MS = 60 * 60 * 1000;
 
 // In development, use host-only cookies (no Domain attribute) so the browser
 // stores them for the frontend origin (localhost:4173) via the Vite proxy.
@@ -96,6 +102,11 @@ export const authConfig = {
   // Server-side lifetime of an enrollment grant. Exposed here so the grant service and its
   // tests cannot drift apart from the cookie that carries it.
   enrollmentGrantLifetimeMs: ENROLLMENT_GRANT_MS,
+
+  // Server-side lifetime of a one-time device bootstrap secret. Exposed here so
+  // the enrollment service, the consume statement and their tests all read the
+  // same number.
+  deviceBootstrapLifetimeMs: DEVICE_BOOTSTRAP_LIFETIME_MS,
 
   // Host-only, HttpOnly, Secure-in-production and SameSite=Lax, like every other auth cookie.
   // There is deliberately no `domain`, so it is never exposed to subdomains.

@@ -4,12 +4,15 @@ export const MAX_CREDENTIAL_ID_LENGTH = 1024;
 export const MAX_CREDENTIAL_FIELD_LENGTH = 16384;
 export const MAX_CHALLENGE_LENGTH = 1024;
 
-export interface MarkAttendanceInput {
-  attendanceSessionId: number;
+export type MissingAttendanceSessionRef =
+  | { kind: "LOCAL"; attendanceSessionId: number }
+  | { kind: "CLOUD"; attendanceSessionSyncId: string };
+
+export type MarkAttendanceInput = MissingAttendanceSessionRef & {
   /** Raw challenge extracted from the assertion's clientDataJSON, used to look up the stored hash. */
   challenge: string;
   assertion: AuthenticationResponseJSON;
-}
+};
 
 function asObject(body: unknown): Record<string, unknown> | null {
   if (body === null || typeof body !== "object" || Array.isArray(body)) {
@@ -158,12 +161,26 @@ export function parseMarkAttendance(body: unknown): MarkAttendanceInput | null {
     return null;
   }
 
+  // A request must name exactly ONE session: a LOCAL integer id or a CLOUD
+  // sync-id UUID. Naming both is rejected so the two never get cross-applied,
+  // and naming neither is rejected so a typo cannot silently mark the wrong,
+  // default session.
   const attendanceSessionId = parseIntegerField(
     obj.attendanceSessionId,
     1,
     Number.MAX_SAFE_INTEGER
   );
-  if (attendanceSessionId === null) {
+  const attendanceSessionSyncId =
+    typeof obj.attendanceSessionSyncId === "string" &&
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+      obj.attendanceSessionSyncId
+    )
+      ? obj.attendanceSessionSyncId
+      : null;
+
+  const hasLocal = attendanceSessionId !== null;
+  const hasCloud = attendanceSessionSyncId !== null;
+  if (hasLocal === hasCloud) {
     return null;
   }
 
@@ -172,9 +189,14 @@ export function parseMarkAttendance(body: unknown): MarkAttendanceInput | null {
     return null;
   }
 
-  return {
-    attendanceSessionId,
+  const base = {
     challenge: assertionResult.challenge,
     assertion: assertionResult.assertion,
   };
+  // Exactly one reference survived the check above (hasLocal !== hasCloud), so
+  // whichever branch fires is guaranteed to hold its field.
+  if (hasCloud) {
+    return { ...base, kind: "CLOUD", attendanceSessionSyncId: attendanceSessionSyncId! };
+  }
+  return { ...base, kind: "LOCAL", attendanceSessionId: attendanceSessionId! };
 }

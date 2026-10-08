@@ -9,6 +9,7 @@ import {
   AdminStudentStatus,
 } from "../types/studentAdmin";
 import { AdminStudentListFilterInput } from "../validation/adminStudentValidation";
+import { appendStudentEvent, appendStudentDeviceEvent } from "./syncMasterDataEmitters";
 
 export type UpdateStudentStatusResult =
   | { ok: true; data: AdminStudentListItem }
@@ -323,6 +324,12 @@ export async function updateStudentStatus(
       ]
     );
 
+    // Published inside the same transaction as the status change, reading the
+    // row back so the payload carries the state the database now holds. The
+    // student keeps the identity it was created with: this is an UPDATED event
+    // on the existing `sync_id`, never a new one.
+    await appendStudentEvent(client, "UPDATED", studentId);
+
     await client.query("COMMIT");
 
     return {
@@ -433,6 +440,15 @@ export async function resetStudentRegistration(
           Number(revokedDevice.rows[0].id),
           `Admin ${adminName ?? `(id ${adminUserId})`} reset registration for student ${row.matric_number} (${row.name}); the active device was revoked together with the registration reset; previous status ACTIVE.`,
         ]
+      );
+
+      // The revocation and its device-state event commit or roll back together
+      // with the rest of the reset, so a committed reset is always published and
+      // a failed one never is.
+      await appendStudentDeviceEvent(
+        client,
+        "UPDATED",
+        Number(revokedDevice.rows[0].id)
       );
     }
 

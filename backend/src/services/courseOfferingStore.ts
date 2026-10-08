@@ -1,5 +1,8 @@
 import { pool } from "../db/pool";
-import { appendCourseOfferingEvent } from "./syncMasterDataEmitters";
+import {
+  appendCourseOfferingEvent,
+  appendCourseRegistrationEvent,
+} from "./syncMasterDataEmitters";
 import {
   AssignedLecturer,
   CourseOffering,
@@ -904,6 +907,16 @@ export async function adminEnrollStudent(
        VALUES ($1, $2, 'ENROLLED')
        RETURNING id, student_id, course_offering_id, status, created_at, updated_at`,
       [student.id, offeringId]
+    );
+
+    // Published on the same client, before the same COMMIT: the audit insert
+    // below failing rolls back the registration AND its event together, so a
+    // committed enrollment always has its change event and a rejected one has
+    // neither.
+    await appendCourseRegistrationEvent(
+      client,
+      "CREATED",
+      Number(regResult.rows[0].id)
     );
 
     const adminName = await findAdminName(adminUserId);

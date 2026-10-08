@@ -54,6 +54,7 @@ interface SessionRow {
 
 const SESSION_SELECT = `
   SELECT s.id, s.course_offering_id, s.started_by_lecturer_id,
+         o.sync_id AS course_offering_sync_id,
          c.course_code, c.title AS course_title,
          s.start_time, s.end_time,
          (EXTRACT(EPOCH FROM s.late_threshold) / 60)::int AS late_threshold_minutes,
@@ -273,6 +274,7 @@ export async function createAttendanceSession(
         cloudLecturerId: lecturerId,
         session: {
           courseOfferingId: session.courseOfferingId,
+          courseOfferingSyncId: sessionRow.course_offering_sync_id,
           courseCode: session.courseCode,
           courseTitle: session.courseTitle,
           lecturerDisplayName: lecturer.name,
@@ -343,7 +345,8 @@ export async function endSession(
     const fullRow = await client.query(`${SESSION_SELECT} WHERE s.id = $1`, [
       endedId,
     ]);
-    const session = toSession(fullRow.rows[0]);
+    const sessionRow = fullRow.rows[0];
+    const session = toSession(sessionRow);
 
     await client.query(
       `INSERT INTO audit_logs (user_id, action, entity_type, entity_id, description)
@@ -369,8 +372,9 @@ export async function endSession(
         syncId: endedSyncId,
         cloudSessionId: endedId,
         cloudLecturerId: lecturerId,
-        session: {
+session: {
           courseOfferingId: session.courseOfferingId,
+          courseOfferingSyncId: sessionRow.course_offering_sync_id,
           courseCode: session.courseCode,
           courseTitle: session.courseTitle,
           lecturerDisplayName: endedLecturer.name,

@@ -7,12 +7,16 @@ import type {
   SyncedAcademicSession,
   SyncedCourse,
   SyncedCourseOffering,
+  SyncedCourseRegistration,
   SyncedDepartment,
   SyncedEntityPayload,
   SyncedFaculty,
   SyncedLecturer,
   SyncedLevel,
   SyncedSemester,
+  SyncedStudent,
+  SyncedStudentDevice,
+  SyncedStudentDeviceBootstrap,
 } from "../types/sync";
 import { SyncApplyError } from "./syncErrors";
 
@@ -35,6 +39,36 @@ import { SyncApplyError } from "./syncErrors";
  *   into the edge's login store. The display name is denormalized into the
  *   projection so nothing needs a row in `users` to attribute a session.
  *
+ * - Students are mirrored into BOTH real tables (`users` + `students`), because
+ *   the edge's attendance queries join them and a projection would leave every
+ *   one of those queries to resolve an identity the edge does not have. The
+ *   local `users` row is created with `password_hash = NULL`, so a synchronized
+ *   student holds no local credential: the row exists for the name, the status
+ *   and the foreign keys, not for login.
+ *
+ * - Course registrations are written into the REAL `course_registrations`
+ *   table, the same one the edge's own eligibility queries read and the one the
+ *   UNIQUE (student, offering) pair already constrains. The pair resolves
+ *   through the mirrored `students` and `course_offerings` rows above, so no
+ *   second registration table and no parallel projection is involved.
+ *
+ * - Device state goes to the `sync_student_devices` projection instead. The
+ *   edge's own `student_devices` table holds credentials enrolled LOCALLY, and
+ *   mixing cloud-owned device rows into it would make a local credential and a
+ *   cloud one indistinguishable - and would put a cloud row in front of the
+ *   attendance verification queries. The projection carries the device's
+ *   opaque reference, its student and its ACTIVE/REVOKED status: the binding
+ *   decision, and nothing credential-shaped. It never creates a student (the
+ *   parent must already be mirrored) and never carries a credential id, public
+ *   key, counter or discoverable flag, because no payload field holds one.
+ *
+ * - One-time bootstrap secrets go to `sync_student_device_bootstraps`
+ *   (migration 022), which holds the SHA-256 HASH of the secret the student
+ *   spends to bind a device - never the secret, which never crosses the
+ *   boundary. The row is spendable only once, by the edge's own consume
+ *   statement, and this applier refuses every shape that could make it
+ *   spendable twice or spendable by the wrong student.
+ *
  * Nothing here copies a password hash, a username, an email, or a WebAuthn or
  * device credential id, because no such field exists in any payload type.
  *
@@ -56,6 +90,8 @@ type MirroredTable =
   | "academic_sessions"
   | "semesters"
   | "course_offerings"
+  | "students"
+  | "course_registrations"
   | "sync_lecturers";
 
 /**
@@ -225,6 +261,10 @@ export const MASTER_DATA_ENTITY_TYPES: readonly SyncEntityType[] = [
   "semester",
   "course_offering",
   "lecturer",
+  "student",
+  "course_registration",
+  "student_device",
+  "student_device_bootstrap",
 ] as const;
 
 export function isMasterDataEntityType(
@@ -509,6 +549,667 @@ async function applyLecturer(
   });
 }
 
+/** Account states `users.status` admits (migrations 001 and 005). */
+const STUDENT_STATUSES = ["ACTIVE", "INACTIVE", "PENDING"] as const;
+
+/**
+ * Mirror the name and account status onto the `users` row a synchronized
+ * student points at.
+ *
+ * The role guard is the "do not merge two unrelated rows" check: `students`
+ * has no constraint stopping it from referencing a user that is not a student,
+ * and writing cloud identity onto such a row would silently re-home the cloud
+ * student onto an unrelated account. Zero rows updated therefore fails the
+ * whole batch instead of adopting anything.
+ */
+async function updateStudentUser(
+  client: PoolClient,
+  userId: number,
+  name: string,
+  status: string
+): Promise<void> {
+  const result = await client.query(
+    `UPDATE users SET name = $2, status = $3 WHERE id = $1 AND role = 'STUDENT'`,
+    [userId, name, status]
+  );
+  if ((result.rowCount ?? 0) === 0) {
+    throw new SyncApplyError(
+      `Cloud student references local user ${userId}, which does not own a STUDENT row. ` +
+        `Refusing to write cloud identity onto an unrelated account.`
+    );
+  }
+}
+
+/**
+ * Write one cloud student into the edge's real `users` + `students` rows.
+ *
+ * Three attempts, in order - the same shape `upsertMirrored` uses, for the same
+ * reason (a fresh edge seeds nothing here, but an edge that already holds the
+ * student from before this feature must be adopted rather than duplicated):
+ *
+ *   1. by `sync_id`: the row already carries the cloud identity, refresh it.
+ *   2. by `matric_number`: a pre-existing local student with the same business
+ *      key adopts the cloud `sync_id` and keeps its local integer id, so its
+ *      `student_devices`, `course_registrations` and attendance history all
+ *      stay attached. The local user row is only updated when it really is a
+ *      student row, so an accidental match cannot merge two accounts.
+ *   3. insert: create the local `users` row (role STUDENT, `password_hash`
+ *      NULL - no credential crosses the boundary) and the `students` row
+ *      beneath it.
+ *
+ * Parents are resolved by UUID through `requireParentRef`, so an edge that has
+ * not mirrored the department or the level yet fails the batch and holds its
+ * cursor instead of writing a row with a NULL foreign key. That failure, and a
+ * matric or sync id that is already taken by a different row, are the two ways
+ * this applier refuses rather than guessing.
+ */
+async function applyStudent(
+  client: PoolClient,
+  payload: SyncedStudent
+): Promise<void> {
+  const matricNumber =
+    typeof payload.matricNumber === "string" ? payload.matricNumber.trim() : "";
+  const name = typeof payload.name === "string" ? payload.name.trim() : "";
+  if (matricNumber === "" || name === "") {
+    throw new SyncApplyError(
+      "Cloud student payload is missing its matricNumber or name."
+    );
+  }
+  const status = payload.status;
+  if (!STUDENT_STATUSES.includes(status)) {
+    throw new SyncApplyError(
+      `Cloud student payload carries unsupported status "${String(payload.status)}".`
+    );
+  }
+  const departmentRef = requireParentRef(
+    "student",
+    "cloudDepartmentSyncId",
+    payload.cloudDepartmentSyncId
+  );
+  const levelRef = requireParentRef(
+    "student",
+    "cloudLevelSyncId",
+    payload.cloudLevelSyncId
+  );
+
+  try {
+    const bySyncId = await client.query(
+      `UPDATE students
+          SET matric_number = $2,
+              department_id = ${parent("departments", 3)},
+              level_id = ${parent("levels", 4)}
+        WHERE sync_id = $1
+        RETURNING id, user_id`,
+      [payload.syncId, matricNumber, departmentRef, levelRef]
+    );
+    if ((bySyncId.rowCount ?? 0) > 0) {
+      await updateStudentUser(
+        client,
+        Number(bySyncId.rows[0].user_id),
+        name,
+        status
+      );
+      return;
+    }
+
+    const byMatric = await client.query(
+      `UPDATE students
+          SET sync_id = $1,
+              department_id = ${parent("departments", 3)},
+              level_id = ${parent("levels", 4)}
+        WHERE matric_number = $2
+        RETURNING id, user_id`,
+      [payload.syncId, matricNumber, departmentRef, levelRef]
+    );
+    if ((byMatric.rowCount ?? 0) > 0) {
+      await updateStudentUser(
+        client,
+        Number(byMatric.rows[0].user_id),
+        name,
+        status
+      );
+      return;
+    }
+
+    const insertedUser = await client.query(
+      `INSERT INTO users (name, role, status, password_hash)
+       VALUES ($1, 'STUDENT', $2, NULL)
+       RETURNING id`,
+      [name, status]
+    );
+    await client.query(
+      `INSERT INTO students (user_id, matric_number, department_id, level_id, sync_id)
+       VALUES ($1, $2, ${parent("departments", 3)}, ${parent("levels", 4)}, $5)`,
+      [
+        Number(insertedUser.rows[0].id),
+        matricNumber,
+        departmentRef,
+        levelRef,
+        payload.syncId,
+      ]
+    );
+  } catch (error) {
+    // A unique violation here means two rows already disagree about who this
+    // student is: the matric number is taken by another local student, or the
+    // cloud identity is already attached to a different matric. Either way the
+    // choice between the rows is a human decision, so the batch fails and the
+    // cursor holds rather than one row silently winning.
+    if ((error as { code?: string }).code === "23505") {
+      throw new SyncApplyError(
+        `Cloud student ${matricNumber} collides with an existing local student ` +
+          `identity (matric number or sync_id already in use). Refusing to guess ` +
+          `which local row is the same student.`
+      );
+    }
+    throw error;
+  }
+}
+
+/** Statuses the `course_registrations` CHECK constraint admits. */
+const REGISTRATION_STATUSES = ["ENROLLED", "DROPPED", "COMPLETED"] as const;
+
+/**
+ * Write one cloud course registration into the edge's real
+ * `course_registrations` row.
+ *
+ * Three attempts, in order - the same shape `upsertMirrored` uses, for the
+ * reason it exists:
+ *
+ *   1. by `sync_id`: the row already carries the cloud identity, so this is a
+ *      refresh of the pair and the status (a re-delivered event, or a
+ *      registration whose pair was re-homed in the cloud).
+ *   2. by the natural key `(student_id, course_offering_id)`: an edge that
+ *      already registered this student for this offering - written locally, or
+ *      mirrored by an earlier event - ADOPTS the cloud `sync_id` and keeps its
+ *      local integer id, so attendance history and eligibility queries pointing
+ *      at the row stay attached. The pair is resolved from the parent UUIDs
+ *      through `parent()`, exactly like the SET clause, so both match paths
+ *      agree on which local ids the UUIDs mean.
+ *   3. insert: a new registration, with both parents resolved by UUID.
+ *
+ * A missing parent is a NOT NULL foreign-key failure inside these statements;
+ * `applyChangeBatch` turns that into the named "referenced parent" error and
+ * holds the cursor, so no row is ever written with a NULL foreign key. A unique
+ * violation that survives both match paths means two local rows disagree about
+ * which one this registration is - the ambiguity test's case - and is refused
+ * rather than guessed, exactly as `applyStudent` refuses its own collision.
+ *
+ * The operation is not branched on: a DROPPED or COMPLETED registration is
+ * carried as a status in the payload, not as a delete. The local row is never
+ * removed, because attendance history references it - the same rule students
+ * follow.
+ */
+async function applyCourseRegistration(
+  client: PoolClient,
+  payload: SyncedCourseRegistration
+): Promise<void> {
+  const status = payload.status;
+  if (!REGISTRATION_STATUSES.includes(status)) {
+    throw new SyncApplyError(
+      `Cloud course registration payload carries unsupported status "${String(
+        payload.status
+      )}".`
+    );
+  }
+  const studentRef = requireParentRef(
+    "course_registration",
+    "cloudStudentSyncId",
+    payload.cloudStudentSyncId
+  );
+  const offeringRef = requireParentRef(
+    "course_registration",
+    "cloudCourseOfferingSyncId",
+    payload.cloudCourseOfferingSyncId
+  );
+
+  try {
+    await upsertMirrored(client, {
+      table: "course_registrations",
+      identityColumn: "sync_id",
+      insertSql: `INSERT INTO course_registrations
+                    (sync_id, student_id, course_offering_id, status)
+                  VALUES ($1, ${parent("students", 2)},
+                          ${parent("course_offerings", 3)}, $4)`,
+      insertValues: [payload.syncId, studentRef, offeringRef, status],
+      set: `sync_id = $1,
+            student_id = ${parent("students", 2)},
+            course_offering_id = ${parent("course_offerings", 3)},
+            status = $4`,
+      setValues: [payload.syncId, studentRef, offeringRef, status],
+      // The business key is the (student, offering) pair, and its values are
+      // LOCAL ids resolved from the cloud UUIDs. Placeholders $5-$6 continue
+      // after the four above and are bound to the same two parent UUIDs the
+      // SET clause uses, so both statements resolve the pair identically.
+      naturalKey: {
+        columns: ["student_id", "course_offering_id"],
+        expressions: [parent("students", 5), parent("course_offerings", 6)],
+        expressionValues: [studentRef, offeringRef],
+      },
+    });
+  } catch (error) {
+    // A unique violation here means two local rows already disagree about which
+    // one this cloud registration is: the sync_id is attached to a different
+    // pair, or the pair is held by a row with a different identity, and
+    // re-homing one of them would collide with the other. Which row is the
+    // same registration is a human decision, so the batch fails and the cursor
+    // holds rather than one row silently winning.
+    if ((error as { code?: string }).code === "23505") {
+      throw new SyncApplyError(
+        `Cloud course registration ${payload.syncId} collides with an existing ` +
+          `local registration (sync_id or the (student, offering) pair is already ` +
+          `in use by a different row). Refusing to guess which local row is the ` +
+          `same registration.`
+      );
+    }
+    throw error;
+  }
+}
+
+/** Statuses the `sync_student_devices` CHECK constraint admits. */
+const STUDENT_DEVICE_STATUSES = ["ACTIVE", "REVOKED"] as const;
+
+/** Statuses the `sync_student_device_bootstraps` CHECK constraint admits. */
+const STUDENT_DEVICE_BOOTSTRAP_STATUSES = ["PENDING", "CONSUMED"] as const;
+
+/**
+ * Write one cloud device-state event into the edge's `sync_student_devices`
+ * projection.
+ *
+ * Three attempts, in order - the shape `upsertMirrored` uses, for the reason it
+ * exists - with two refusal checks the other appliers do not need:
+ *
+ *   1. by `sync_id`: the replica row already carries the cloud identity, so
+ *      this is a status refresh of the same device.
+ *   2. by the natural key `cloud_device_ref`: an edge that already holds this
+ *      device under a different identity adopts the cloud's `sync_id` onto the
+ *      same row instead of duplicating it.
+ *   3. insert: a new replica row, with the student resolved by UUID.
+ *
+ * Both match paths are read before anything is written, and the STUDENT is
+ * checked on whichever row matches: a device never changes owner, so an event
+ * that would move an existing replica row onto a different student is refused
+ * rather than re-homed. Two rows matching means the edge already disagrees
+ * about which replica row this event is, which is refused the same way a
+ * registration pair collision is.
+ *
+ * The one-active invariant is enforced explicitly, before any write: a status
+ * ACTIVE event for a student who already holds a DIFFERENT ACTIVE replica row
+ * is refused. The cloud revokes a device before replacing it inside one
+ * transaction, so the feed cannot arrive in the other order under normal
+ * operation - but installing a second active binding would break exactly the
+ * rule the whole design rests on, so an inconsistent feed stops the cursor for
+ * a human instead of silently picking a winner. The partial unique index
+ * `one_active_sync_student_device_per_student` is the database-level backstop.
+ *
+ * A missing parent fails before any row is written: the student is resolved by
+ * UUID first, and this applier never creates one (unlike `applyStudent`,
+ * which may), so a device whose student has not synchronized yet holds the
+ * cursor rather than dangling or conjuring an identity.
+ *
+ * The operation is not branched on: REVOKED is a status in the payload, not a
+ * delete. The replica row is never removed, so a re-delivered revocation
+ * resolves to the same row and a revoked device stays auditable.
+ */
+async function applyStudentDevice(
+  client: PoolClient,
+  payload: SyncedStudentDevice
+): Promise<void> {
+  const status = payload.status;
+  if (!STUDENT_DEVICE_STATUSES.includes(status)) {
+    throw new SyncApplyError(
+      `Cloud student device payload carries unsupported status "${String(
+        payload.status
+      )}".`
+    );
+  }
+  const studentRef = requireParentRef(
+    "student_device",
+    "cloudStudentSyncId",
+    payload.cloudStudentSyncId
+  );
+  if (typeof payload.cloudDeviceRef !== "string" || payload.cloudDeviceRef === "") {
+    throw new SyncApplyError(
+      "Cloud student device payload is missing its cloudDeviceRef reference."
+    );
+  }
+
+  const resolved = await client.query(
+    `SELECT id FROM students WHERE sync_id = $1`,
+    [studentRef]
+  );
+  if ((resolved.rowCount ?? 0) === 0) {
+    // Phrased the same way `applyChangeBatch` phrases the foreign-key failure,
+    // so an operator sees one diagnosis for "the parent is not here" no matter
+    // which applier hit it.
+    throw new SyncApplyError(
+      `Cannot apply cloud student device ${payload.syncId}: a referenced parent ` +
+        `(student ${studentRef}) is not present on this edge. ` +
+        `The cloud emits a student's CREATED event before anything that references it, ` +
+        `so this normally means the edge cursor was advanced past it.`
+    );
+  }
+  const studentId = Number(resolved.rows[0].id);
+
+  const bySyncId = await client.query(
+    `SELECT cloud_sync_id, cloud_device_ref, student_id
+       FROM sync_student_devices WHERE cloud_sync_id = $1`,
+    [payload.syncId]
+  );
+  const byDeviceRef = await client.query(
+    `SELECT cloud_sync_id, cloud_device_ref, student_id
+       FROM sync_student_devices WHERE cloud_device_ref = $1`,
+    [payload.cloudDeviceRef]
+  );
+
+  const matched =
+    (bySyncId.rowCount ?? 0) > 0
+      ? bySyncId.rows[0]
+      : (byDeviceRef.rowCount ?? 0) > 0
+        ? byDeviceRef.rows[0]
+        : null;
+
+  if (
+    matched !== null &&
+    (bySyncId.rowCount ?? 0) > 0 &&
+    (byDeviceRef.rowCount ?? 0) > 0 &&
+    bySyncId.rows[0].cloud_sync_id !== byDeviceRef.rows[0].cloud_sync_id
+  ) {
+    throw new SyncApplyError(
+      `Cloud student device ${payload.syncId} collides with an existing local replica ` +
+        `(its sync_id and its device reference are held by different rows). ` +
+        `Refusing to guess which local row is the same device.`
+    );
+  }
+  if (matched !== null && Number(matched.student_id) !== studentId) {
+    throw new SyncApplyError(
+      `Cloud student device ${payload.syncId} resolves to a local replica row belonging to a different student. ` +
+        `A device never changes owner; refusing to re-home it.`
+    );
+  }
+
+  if (status === "ACTIVE") {
+    // Excluding the matched row by its cloud identity (the table's primary
+    // key) rather than a local integer: the projection has no local identity,
+    // and a status refresh of this same device must not read itself as a
+    // second active binding.
+    const conflict = await client.query(
+      `SELECT 1 FROM sync_student_devices
+        WHERE student_id = $1 AND status = 'ACTIVE'
+          AND ($2::uuid IS NULL OR cloud_sync_id <> $2)
+        LIMIT 1`,
+      [studentId, matched === null ? null : (matched.cloud_sync_id as string)]
+    );
+    if ((conflict.rowCount ?? 0) > 0) {
+      throw new SyncApplyError(
+        `Cloud student device ${payload.syncId} would make a second device ACTIVE for student ${studentRef}, ` +
+          `but this edge already holds a different ACTIVE device for them. The cloud revokes a device before ` +
+          `replacing it, so this event is out of order; refusing to pick one.`
+      );
+    }
+  }
+
+  try {
+    if (matched !== null) {
+      // Both cloud identities come from the payload, keyed by the row's
+      // CURRENT cloud sync id (its primary key). On the sync-id path the first
+      // assignment is a no-op; on the device-reference path it is the adoption
+      // itself - an edge that already held this device under another identity
+      // keeps its row and takes the cloud's.
+      await client.query(
+        `UPDATE sync_student_devices
+            SET cloud_sync_id = $2,
+                cloud_device_ref = $3,
+                student_id = $4,
+                cloud_student_sync_id = $5,
+                status = $6
+          WHERE cloud_sync_id = $1`,
+        [
+          matched.cloud_sync_id as string,
+          payload.syncId,
+          payload.cloudDeviceRef,
+          studentId,
+          studentRef,
+          status,
+        ]
+      );
+      return;
+    }
+
+    await client.query(
+      `INSERT INTO sync_student_devices
+         (cloud_sync_id, cloud_device_ref, student_id, cloud_student_sync_id, status)
+       VALUES ($1, $2, $3, $4, $5)`,
+      [payload.syncId, payload.cloudDeviceRef, studentId, studentRef, status]
+    );
+  } catch (error) {
+    // A unique violation here means two replica rows already disagree about
+    // which one this cloud device is - the sync id, the device reference or the
+    // one-ACTIVE-device rule is held by another row. Which row is the same
+    // device is a human decision, so the batch fails and the cursor holds
+    // rather than one row silently winning.
+    if ((error as { code?: string }).code === "23505") {
+      throw new SyncApplyError(
+        `Cloud student device ${payload.syncId} collides with an existing local replica ` +
+          `(sync_id, device reference or the one-active-device rule is already in use by another row). ` +
+          `Refusing to guess which local row is the same device.`
+      );
+    }
+    throw error;
+  }
+}
+
+/**
+ * Write one one-time bootstrap event into `sync_student_device_bootstraps`.
+ *
+ * Same three-attempt shape as `applyStudentDevice` above: by cloud sync id,
+ * then by the natural key `cloud_device_ref`, with the same collision refusal
+ * if the two ever disagree - plus three rules of its own, because this row is
+ * spendable credential material rather than state:
+ *
+ *   1. The parent device must already be in the `sync_student_devices`
+ *      projection. The cloud emits the device's CREATED event before it mints
+ *      any secret for that device, so a bootstrap arriving first means the
+ *      cursor was advanced past the device - the cursor holds, exactly as for a
+ *      missing student, rather than storing a secret bound to a device this
+ *      edge cannot check.
+ *
+ *   2. The device must belong to the resolved student. The consume statement
+ *      joins the device projection to the student, so a bootstrap whose two
+ *      references point at different students could never be spent - and
+ *      storing it anyway would leave a row that looks spendable to a reader.
+ *
+ *   3. CONSUMED is never regressed. The cloud only ever emits PENDING (it is
+ *      never told of consumption), so a PENDING event over a CONSUMED row is
+ *      either a re-delivery or an out-of-order replay of the original mint.
+ *      Either way the secret is already spent: the status update skips both
+ *      `status` and `consumed_at`, keeping the row exactly as the edge left
+ *      it. A spent secret must not become spendable again by being delivered
+ *      twice.
+ *
+ * An expired row is stored, not refused: expiry is checked at consume time
+ * against the clock, and refusing to store would turn "this secret is no
+ * longer valid" into a cursor the operator has to unpick by hand.
+ */
+async function applyStudentDeviceBootstrap(
+  client: PoolClient,
+  payload: SyncedStudentDeviceBootstrap
+): Promise<void> {
+  const status = payload.status;
+  if (!STUDENT_DEVICE_BOOTSTRAP_STATUSES.includes(status)) {
+    throw new SyncApplyError(
+      `Cloud student device bootstrap payload carries unsupported status "${String(
+        payload.status
+      )}".`
+    );
+  }
+  const studentRef = requireParentRef(
+    "student_device_bootstrap",
+    "cloudStudentSyncId",
+    payload.cloudStudentSyncId
+  );
+  if (
+    typeof payload.cloudDeviceRef !== "string" ||
+    payload.cloudDeviceRef === ""
+  ) {
+    throw new SyncApplyError(
+      "Cloud student device bootstrap payload is missing its cloudDeviceRef reference."
+    );
+  }
+  if (typeof payload.secretHash !== "string" || payload.secretHash === "") {
+    throw new SyncApplyError(
+      "Cloud student device bootstrap payload is missing its secretHash."
+    );
+  }
+  if (
+    typeof payload.expiresAt !== "string" ||
+    Number.isNaN(Date.parse(payload.expiresAt))
+  ) {
+    throw new SyncApplyError(
+      "Cloud student device bootstrap payload carries an unreadable expiresAt."
+    );
+  }
+
+  const resolved = await client.query(
+    `SELECT id FROM students WHERE sync_id = $1`,
+    [studentRef]
+  );
+  if ((resolved.rowCount ?? 0) === 0) {
+    throw new SyncApplyError(
+      `Cannot apply cloud student device bootstrap ${payload.syncId}: a referenced parent ` +
+        `(student ${studentRef}) is not present on this edge. ` +
+        `The cloud emits a student's CREATED event before anything that references it, ` +
+        `so this normally means the edge cursor was advanced past it.`
+    );
+  }
+  const studentId = Number(resolved.rows[0].id);
+
+  const device = await client.query(
+    `SELECT cloud_sync_id, student_id
+       FROM sync_student_devices WHERE cloud_device_ref = $1`,
+    [payload.cloudDeviceRef]
+  );
+  if ((device.rowCount ?? 0) === 0) {
+    throw new SyncApplyError(
+      `Cannot apply cloud student device bootstrap ${payload.syncId}: a referenced parent ` +
+        `(device ${payload.cloudDeviceRef}) is not present on this edge. ` +
+        `The cloud emits a device's CREATED event before minting any secret for it, ` +
+        `so this normally means the edge cursor was advanced past it.`
+    );
+  }
+  if (Number(device.rows[0].student_id) !== studentId) {
+    throw new SyncApplyError(
+      `Cloud student device bootstrap ${payload.syncId} binds device ${payload.cloudDeviceRef} ` +
+        `to student ${studentRef}, but this edge holds that device for a different student. ` +
+        `A secret can only unlock the device it was minted for; refusing to store it.`
+    );
+  }
+
+  const bySyncId = await client.query(
+    `SELECT cloud_sync_id, cloud_device_ref, student_id, status
+       FROM sync_student_device_bootstraps WHERE cloud_sync_id = $1`,
+    [payload.syncId]
+  );
+  const byDeviceRef = await client.query(
+    `SELECT cloud_sync_id, cloud_device_ref, student_id, status
+       FROM sync_student_device_bootstraps WHERE cloud_device_ref = $1`,
+    [payload.cloudDeviceRef]
+  );
+
+  const matched =
+    (bySyncId.rowCount ?? 0) > 0
+      ? bySyncId.rows[0]
+      : (byDeviceRef.rowCount ?? 0) > 0
+        ? byDeviceRef.rows[0]
+        : null;
+
+  if (
+    matched !== null &&
+    (bySyncId.rowCount ?? 0) > 0 &&
+    (byDeviceRef.rowCount ?? 0) > 0 &&
+    bySyncId.rows[0].cloud_sync_id !== byDeviceRef.rows[0].cloud_sync_id
+  ) {
+    throw new SyncApplyError(
+      `Cloud student device bootstrap ${payload.syncId} collides with an existing local replica ` +
+        `(its sync_id and its device reference are held by different rows). ` +
+        `Refusing to guess which local row is the same bootstrap.`
+    );
+  }
+  if (matched !== null && Number(matched.student_id) !== studentId) {
+    throw new SyncApplyError(
+      `Cloud student device bootstrap ${payload.syncId} resolves to a local replica row belonging to a different student. ` +
+        `A bootstrap never changes owner; refusing to re-home it.`
+    );
+  }
+
+  try {
+    if (matched !== null) {
+      // Both cloud identities come from the payload, keyed by the row's
+      // CURRENT cloud sync id (its primary key). On the sync-id path the first
+      // assignment is a no-op; on the device-reference path it is the adoption
+      // itself - an edge that already held this bootstrap under another
+      // identity keeps its row and takes the cloud's.
+      //
+      // CONSUMED is never regressed: the CASE keeps a spent row spent even
+      // when the replayed event says PENDING, and keeps `consumed_at` intact
+      // so the paired CHECK constraint holds.
+      await client.query(
+        `UPDATE sync_student_device_bootstraps
+            SET cloud_sync_id = $2,
+                cloud_device_ref = $3,
+                student_id = $4,
+                cloud_student_sync_id = $5,
+                secret_hash = $6,
+                status = CASE WHEN status = 'CONSUMED' THEN status ELSE $7 END,
+                consumed_at = CASE WHEN status = 'CONSUMED'
+                                   THEN consumed_at ELSE NULL END,
+                expires_at = $8
+          WHERE cloud_sync_id = $1`,
+        [
+          matched.cloud_sync_id as string,
+          payload.syncId,
+          payload.cloudDeviceRef,
+          studentId,
+          studentRef,
+          payload.secretHash,
+          status,
+          payload.expiresAt,
+        ]
+      );
+      return;
+    }
+
+    await client.query(
+      `INSERT INTO sync_student_device_bootstraps
+         (cloud_sync_id, cloud_device_ref, student_id, cloud_student_sync_id,
+          secret_hash, status, expires_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+      [
+        payload.syncId,
+        payload.cloudDeviceRef,
+        studentId,
+        studentRef,
+        payload.secretHash,
+        status,
+        payload.expiresAt,
+      ]
+    );
+  } catch (error) {
+    // A unique violation here means two replica rows already disagree about
+    // which one this cloud bootstrap is - the sync id or the device reference
+    // is held by another row (at most one bootstrap per device, by design).
+    // Which row is the same bootstrap is a human decision, so the batch fails
+    // and the cursor holds rather than one row silently winning.
+    if ((error as { code?: string }).code === "23505") {
+      throw new SyncApplyError(
+        `Cloud student device bootstrap ${payload.syncId} collides with an existing local replica ` +
+          `(sync_id or device reference is already in use by another row). ` +
+          `Refusing to guess which local row is the same bootstrap.`
+      );
+    }
+    throw error;
+  }
+}
+
 /**
  * Apply one master-data event.
  *
@@ -558,6 +1259,23 @@ export async function applyMasterDataEvent(
     // edge knows, so it is refused rather than silently discarded.
     case "lecturer":
       return applyLecturer(client, requirePayload<SyncedLecturer>(entityType, event.payload));
+    case "student":
+      return applyStudent(client, requirePayload<SyncedStudent>(entityType, event.payload));
+    case "course_registration":
+      return applyCourseRegistration(
+        client,
+        requirePayload<SyncedCourseRegistration>(entityType, event.payload)
+      );
+    case "student_device":
+      return applyStudentDevice(
+        client,
+        requirePayload<SyncedStudentDevice>(entityType, event.payload)
+      );
+    case "student_device_bootstrap":
+      return applyStudentDeviceBootstrap(
+        client,
+        requirePayload<SyncedStudentDeviceBootstrap>(entityType, event.payload)
+      );
     default:
       throw new SyncApplyError(
         `Unsupported sync entity type "${entityType}". The edge cannot advance its cursor past an entity it does not understand.`

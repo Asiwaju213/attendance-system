@@ -55,6 +55,7 @@ async function seedFeedEvents(
       syncId,
       cloudSessionId: 1000 + index,
       cloudCourseOfferingId: 7,
+      cloudCourseOfferingSyncId: randomUUID(),
       cloudLecturerId: 3,
       courseCode: "SYNC 101",
       courseTitle: "Synchronization Fundamentals",

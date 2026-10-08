@@ -160,9 +160,13 @@ test("closing an attendance session creates a CLOSED sync event", async () => {
 test("the application has no attendance-session field update, so no UPDATED event is emitted", async () => {
   // Documents a real property of the system rather than asserting an aspiration:
   // the only two mutations the API permits are start and end, so the feed only
-  // ever contains CREATED and CLOSED for sessions.
+  // ever contains CREATED and CLOSED for sessions. The scope is attendance
+  // sessions because other entity types legitimately emit UPDATED - a course
+  // rename, or a student status change (Task 1) - and those say nothing about
+  // this endpoint.
   const result = await pool.query(
-    `SELECT DISTINCT operation FROM sync_change_events ORDER BY operation`
+    `SELECT DISTINCT operation FROM sync_change_events
+      WHERE entity_type = 'attendance_session' ORDER BY operation`
   );
   for (const row of result.rows) {
     assert.ok(
@@ -286,7 +290,19 @@ test("a valid edge credential reads the feed", async () => {
   assert.equal(typeof body.data.nextCursor, "number");
   assert.equal(typeof body.data.hasMore, "boolean");
 
-  const match = body.data.events.find((event) => event.entityId === created.syncId);
+  // Start the page immediately before the session: the feed holds every
+  // synchronized entity's events (students since Task 1 included), so asking
+  // from cursor 0 would return the oldest page and might not reach it.
+  const [sessionEvent] = await eventsForSession(created.syncId);
+  assert.ok(sessionEvent, "the created session must have an event");
+  const page = await get(
+    `/api/internal/sync/changes?cursor=${Number(sessionEvent.cursor) - 1}`,
+    syncAuthHeaders()
+  );
+  const pageBody = (await page.json()) as {
+    data: { events: Array<{ entityId: string; cursor: number; operation: string }> };
+  };
+  const match = pageBody.data.events.find((event) => event.entityId === created.syncId);
   assert.ok(match, "the created session should appear in the feed");
   assert.equal(match!.operation, "CREATED");
 });
@@ -346,7 +362,7 @@ test("limit is bounded and invalid cursor/limit are rejected", async () => {
   }
 });
 
-test("the feed payload contains no student, password, session or WebAuthn data", async () => {
+test("the feed payload contains no password, session cookie or WebAuthn data", async () => {
   const created = await createSessionViaApi();
   const response = await get("/api/internal/sync/changes?cursor=0", syncAuthHeaders());
   const raw = await response.text();
@@ -355,7 +371,10 @@ test("the feed payload contains no student, password, session or WebAuthn data",
   assert.ok(!raw.toLowerCase().includes("credential_id"), "no device credential ids");
   assert.ok(!raw.toLowerCase().includes("webauthn"), "no WebAuthn material");
   assert.ok(!raw.includes("oou_session"), "no session cookie");
-  assert.ok(!raw.toLowerCase().includes("matric"), "no student identity");
+  // A student's matric number DOES cross the boundary since Task 1: it is the
+  // business key the edge matches a cloud student against, and without it the
+  // event could not be applied. Identity material that must never cross is
+  // password, credential and cookie data, asserted above.
   assert.ok(!raw.includes("sync_edge_secret") && !raw.includes(TEST_EDGE_SECRET));
 });
 

@@ -59,6 +59,8 @@ export interface AttendanceSessionEventInput {
   cloudLecturerId: number;
   session: {
     courseOfferingId: number;
+    /** The offering's `sync_id` - the cross-database identity that lets the edge mark a cloud session locally. */
+    courseOfferingSyncId: string;
     courseCode: string;
     courseTitle: string;
     lecturerDisplayName: string;
@@ -87,6 +89,7 @@ function toSyncedAttendanceSession(
     syncId: input.syncId,
     cloudSessionId: input.cloudSessionId,
     cloudCourseOfferingId: input.session.courseOfferingId,
+    cloudCourseOfferingSyncId: input.session.courseOfferingSyncId,
     cloudLecturerId: input.cloudLecturerId,
     courseCode: input.session.courseCode,
     courseTitle: input.session.courseTitle,

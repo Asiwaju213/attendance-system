@@ -18,11 +18,25 @@ function runTsx(args: string[]): Promise<number> {
         // enrollment, attendance, registration) describe that deployment, and with the
         // fail-closed `cloud` default they could not mint a student session at all.
         //
-        // It is set here rather than left to backend/.env so the suite behaves the same on every
-        // machine - dotenv does not overwrite an existing value - and so a developer's local .env
-        // cannot change what the tests exercise. Cloud-mode behaviour is asserted explicitly in
-        // tests/studentAccessPolicy.test.ts, which builds its own apps in both modes.
-        env: { ...process.env, STUDENT_ACCESS_MODE: "edge" },
+        // The WebAuthn RP identity is pinned for the same reason: the suites drive real
+        // registration/assertion ceremonies through @simplewebauthn/server, and the local
+        // development origin (http://localhost:4173 with RP id "localhost") is the one the
+        // project supports out of the box. A developer's .env WEBAUTHN_RP_ID/WEBAUTHN_ORIGIN for
+        // their LAN or TLS setup must not leak into the tests, whose assertions hard-code the
+        // development origin. Production WebAuthn configuration is left untouched.
+        //
+        // Both are set here rather than left to backend/.env so the suites behave the same on
+        // every machine - dotenv does not overwrite an existing value - and so a developer's
+        // local .env cannot change what the tests exercise. Cloud-mode behaviour is asserted
+        // explicitly in tests/studentAccessPolicy.test.ts, which builds its own apps in both
+        // modes. DOTENV_CONFIG_* is deliberately not used: the config modules read these values
+        // at import time, and the pinned child environment is the single deterministic source.
+        env: {
+          ...process.env,
+          STUDENT_ACCESS_MODE: "edge",
+          WEBAUTHN_RP_ID: "localhost",
+          WEBAUTHN_ORIGIN: "http://localhost:4173",
+        },
         stdio: "inherit",
       }
     );

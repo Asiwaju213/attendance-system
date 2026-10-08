@@ -1,6 +1,7 @@
 import { pool } from "../db/pool";
 import { hashSessionToken } from "../lib/sessions";
 import { expireActiveEnrollmentGrants } from "./studentDeviceEnrollmentGrantStore";
+import { appendStudentDeviceEvent } from "./syncMasterDataEmitters";
 
 export interface AdminStudentDeviceRow {
   id: number;
@@ -233,6 +234,11 @@ export async function resetStudentDevice(
        WHERE id = $1`,
       [activeDevice.id]
     );
+
+    // The reset and its device-state event commit or roll back together: a
+    // committed admin reset is always published to the feed, and a failed one
+    // never is. Same client, before the same COMMIT.
+    await appendStudentDeviceEvent(client, "UPDATED", Number(activeDevice.id));
 
     await client.query(
       `UPDATE student_device_enrollment_challenges

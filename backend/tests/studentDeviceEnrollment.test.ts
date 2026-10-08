@@ -1339,10 +1339,20 @@ test("DEVICE reset: an admin device reset lets the student enrol a fresh credent
   );
 });
 
-test("DEVICE reset: a student registration reset leaves the device usable and upgradeable", async () => {
+test("DEVICE reset: a student registration reset revokes the active device and publishes it", async () => {
   const sid = await studentId(upgradeStudent.userId);
   const before = await deviceRowsForUpgradeStudent();
-  const activeCredentialId = before.find((r) => r.status === "ACTIVE")!.credential_id;
+  const active = before.find((r) => r.status === "ACTIVE");
+  assert.ok(active, "the student must hold an active device before the reset");
+
+  // Device rows carry their own sync identity (migration 021); the reset publishes
+  // the revocation against it so the edge can retire the active binding.
+  const deviceRow = await pool.query(
+    `SELECT sync_id FROM student_devices WHERE id = $1`,
+    [active.id]
+  );
+  assert.equal(deviceRow.rowCount, 1);
+  const deviceSyncId = deviceRow.rows[0].sync_id as string;
 
   const resetRes = await postJson(
     `/api/admin/students/${sid}/reset-registration`,
@@ -1350,22 +1360,41 @@ test("DEVICE reset: a student registration reset leaves the device usable and up
     cookieHeader(adminUser.userId)
   );
   assert.equal(resetRes.status, 200);
+  const resetBody = (await resetRes.json()) as { data: { status: string } };
+  assert.equal(
+    resetBody.data.status,
+    "PENDING",
+    "the account must return to the unclaimed state"
+  );
 
-  // The device is deliberately NOT revoked by a registration reset, so attendance is unaffected.
+  // A registration reset revokes the active device so a single action fully releases
+  // the account for fresh enrollment on a new phone. The row is revoked, never
+  // deleted, so the credential stays auditable.
   const afterReset = await deviceRowsForUpgradeStudent();
+  const revoked = afterReset.find((r) => r.credential_id === active.credential_id);
   assert.equal(
-    afterReset.find((r) => r.credential_id === activeCredentialId)!.status,
-    "ACTIVE",
-    "a registration reset must not revoke the student's device"
+    revoked?.status,
+    "REVOKED",
+    "the active device must be revoked by a registration reset"
+  );
+  assert.ok(
+    revoked?.revoked_at,
+    "the revoked row must record when it was revoked"
   );
   assert.equal(
-    (await resolveAttendanceDevice(upgradeStudent.userId))?.credentialId,
-    activeCredentialId,
-    "attendance must keep working after a registration reset"
+    afterReset.filter((r) => r.status === "ACTIVE").length,
+    0,
+    "the student must hold no usable device after the reset"
   );
 
-  // The account is PENDING again, so the student cannot enrol until they re-register; the
-  // device is left exactly as it was, and the upgrade remains available afterwards.
+  // Attendance no longer resolves a device while the account is PENDING.
+  assert.equal(
+    await resolveAttendanceDevice(upgradeStudent.userId),
+    null,
+    "no active device must remain for attendance"
+  );
+
+  // A PENDING account cannot start a fresh enrollment until it re-registers.
   const pendingRes = await postJson(
     "/api/student/device/enrollment/options",
     {},
@@ -1376,11 +1405,54 @@ test("DEVICE reset: a student registration reset leaves the device usable and up
     401,
     "a PENDING account must not be able to start an enrollment"
   );
+
+  // The revocation is audited under the established device-reset action, in the
+  // same transaction as the registration reset itself.
+  const deviceResetAudit = await pool.query(
+    `SELECT action, entity_type, entity_id FROM audit_logs
+     WHERE action = 'STUDENT_DEVICE_RESET'
+       AND entity_type = 'student_devices'
+       AND entity_id = $1`,
+    [active.id]
+  );
   assert.equal(
-    (await deviceRowsForUpgradeStudent()).find(
-      (r) => r.credential_id === activeCredentialId
-    )!.status,
-    "ACTIVE"
+    deviceResetAudit.rowCount,
+    1,
+    "the device revocation must be audited"
+  );
+  const registrationResetAudit = await pool.query(
+    `SELECT action, entity_type, entity_id FROM audit_logs
+     WHERE action = 'STUDENT_REGISTRATION_RESET'
+       AND entity_type = 'users'
+       AND entity_id = $1`,
+    [upgradeStudent.userId]
+  );
+  assert.equal(
+    registrationResetAudit.rowCount,
+    1,
+    "the registration reset itself must be audited"
+  );
+
+  // The revocation is published to the feed inside the same transaction, so the
+  // edge sees the binding retired even while this K12 is offline.
+  const feed = await pool.query(
+    `SELECT operation, payload
+     FROM sync_change_events
+     WHERE entity_type = 'student_device'
+       AND entity_id = $1
+     ORDER BY cursor DESC`,
+    [deviceSyncId]
+  );
+  const published = feed.rows[0];
+  assert.ok(
+    published,
+    "a student_device feed event must be emitted for the revoked device"
+  );
+  assert.equal(published.operation, "UPDATED");
+  assert.equal(
+    (published.payload as { entity?: { status?: string } }).entity?.status,
+    "REVOKED",
+    "the feed must describe the revoked state, not the old one"
   );
 });
 

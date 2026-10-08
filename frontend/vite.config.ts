@@ -9,7 +9,7 @@ const envDir = fileURLToPath(new URL('.', import.meta.url))
 
 // https://vite.dev/config/
 export default defineConfig(({ mode }) => {
-  const { host, port, strictPort, apiProxyTarget } = resolveDevServerConfig(
+  const { host, port, strictPort, apiProxyTarget, https } = resolveDevServerConfig(
     loadEnv(mode, envDir, 'VITE_'),
   )
 
@@ -21,6 +21,7 @@ export default defineConfig(({ mode }) => {
       host,
       port,
       strictPort,
+      ...(https ? { https } : {}),
       proxy: {
         // The browser only ever requests the relative path `/api/...`, so requests
         // stay same-origin and the API needs no CORS policy. That holds when the page

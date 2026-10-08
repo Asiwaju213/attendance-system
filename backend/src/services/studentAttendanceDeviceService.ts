@@ -7,7 +7,7 @@ import {
   verifyStudentDevice,
 } from "../lib/webauthn";
 import type { MarkedAttendance } from "../types/attendanceSession";
-import { markAttendance, MarkAttendanceErrorCode } from "./studentAttendanceStore";
+import { markAttendance, markAttendanceOnCloudSession, MarkAttendanceErrorCode } from "./studentAttendanceStore";
 import {
   findLatestDeviceByStudentId,
   findStudentByUserId,
@@ -273,4 +273,23 @@ export async function markAttendanceWithDeviceProof(
   }
 
   return markAttendance(userId, attendanceSessionId);
+}
+
+/**
+ * The authoritative cloud-session write (Task 4): the SAME device proof gate as
+ * the local path, then delegation to `markAttendanceOnCloudSession`, whose checks
+ * mirror `markAttendance` against the projection's synced state.
+ */
+export async function markCloudSessionWithDeviceProof(
+  userId: number,
+  sessionSyncId: string,
+  challenge: string,
+  assertion: AuthenticationResponseJSON
+): Promise<MarkAttendanceWithDeviceResult> {
+  const proof = await verifyAttendanceDeviceProof(userId, challenge, assertion);
+  if (!proof.ok) {
+    return { ok: false, code: proof.code };
+  }
+
+  return markAttendanceOnCloudSession(userId, sessionSyncId);
 }

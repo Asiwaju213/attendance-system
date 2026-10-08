@@ -16,7 +16,13 @@
 // per existing row, using the same emitters the stores use. Going through the
 // emitters rather than assembling payloads here is deliberate: it guarantees the
 // backfilled payload is byte-for-byte the same shape a live change would produce,
-// so the edge needs no special case for "initial state".
+// so the edge needs no special case for "initial state". Students are included,
+// because migration 019 gave every pre-existing student a `sync_id` without
+// publishing one: they are emitted after departments and levels, the two parents
+// an edge has to hold before it can write a student row. Registrations and
+// device states are included for the same reason - migration 020 and migration
+// 021 gave those rows their identities in place - and are emitted after the
+// students they reference.
 //
 // It is safe to run more than once. Re-running appends duplicate events, which
 // the edge absorbs through its existing idempotency (each is applied, then the
@@ -39,11 +45,14 @@ import {
   appendAcademicSessionEvent,
   appendCourseEvent,
   appendCourseOfferingEvent,
+  appendCourseRegistrationEvent,
   appendDepartmentEvent,
   appendFacultyEvent,
   appendLevelEvent,
   appendLecturerEvent,
   appendSemesterEvent,
+  appendStudentDeviceEvent,
+  appendStudentEvent,
 } from "../src/services/syncMasterDataEmitters";
 
 dotenv.config({
@@ -118,6 +127,25 @@ const EMITTERS: ReadonlyArray<{ table: string; emit: MasterDataEmitter }> = [
   { table: "courses", emit: appendCourseEvent },
   { table: "course_offerings", emit: appendCourseOfferingEvent },
   { table: "lecturers", emit: appendLecturerEvent },
+  // Students come after the departments and levels they reference, which the
+  // edge has to hold before a student event can be applied to it. Students
+  // imported before their sync events existed (migration 019 gave them their
+  // identity in place) are published here exactly once through the same
+  // emitter the live import path uses.
+  { table: "students", emit: appendStudentEvent },
+  // Device states after the students they reference: a device event resolves
+  // its student by UUID and never creates one, so the edge must already hold
+  // the student before the first device event for them is applied. Every
+  // pre-existing device row got its `sync_id` and `device_ref` from migration
+  // 021's column defaults in place; this publishes their state exactly once
+  // through the same emitter the live enrollment and reset paths use.
+  { table: "student_devices", emit: appendStudentDeviceEvent },
+  // Registrations after students and offerings: a registration event resolves
+  // BOTH parents by UUID, so the edge must already hold each one. Registrations
+  // written before this feature existed (migration 020 gave them their identity
+  // in place) are published here exactly once through the same emitter the
+  // live registration paths use.
+  { table: "course_registrations", emit: appendCourseRegistrationEvent },
 ];
 
 /**

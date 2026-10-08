@@ -3,6 +3,7 @@ import { requireAuth, requireStudent } from "../middleware/authenticate";
 import {
   createAttendanceDeviceChallenge,
   markAttendanceWithDeviceProof,
+  markCloudSessionWithDeviceProof,
 } from "../services/studentAttendanceDeviceService";
 import { getEligibleAttendanceSessions } from "../services/studentAttendanceStore";
 import { parseMarkAttendance } from "../validation/studentAttendanceValidation";
@@ -169,17 +170,25 @@ router.post("/attendance", async (req: Request, res: Response) => {
     res.status(400).json({
       error: "INVALID_REQUEST",
       message:
-        "Request must include a valid attendanceSessionId and an assertion object.",
+        "Request must include exactly one of attendanceSessionId or attendanceSessionSyncId (a UUID) and a valid assertion object.",
     });
     return;
   }
 
-  const result = await markAttendanceWithDeviceProof(
-    req.user!.id,
-    input.attendanceSessionId,
-    input.challenge,
-    input.assertion
-  );
+  const result =
+    input.kind === "CLOUD"
+      ? await markCloudSessionWithDeviceProof(
+          req.user!.id,
+          input.attendanceSessionSyncId,
+          input.challenge,
+          input.assertion
+        )
+      : await markAttendanceWithDeviceProof(
+          req.user!.id,
+          input.attendanceSessionId,
+          input.challenge,
+          input.assertion
+        );
   if (!result.ok) {
     sendMarkError(res, result.code);
     return;

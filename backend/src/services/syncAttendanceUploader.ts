@@ -1,4 +1,4 @@
-import { syncConfig } from "../config/sync";
+import { syncConfig, type SyncConsumerConfig } from "../config/sync";
 import {
   listPendingUploads,
   recordUploadResult,
@@ -68,9 +68,17 @@ interface WireOutcome {
  *
  * The page size is the provider batch limit, so the edge cannot ask for more than
  * the cloud is willing to accept in one request.
+ *
+ * A caller may pass an explicit consumer config (tests talk to an in-process cloud);
+ * when omitted the process-level config is used.
  */
-export async function uploadPendingAttendanceMarks(): Promise<UploadSummary> {
-  const marks = await listPendingUploads(syncConfig.provider.batchLimit);
+export async function uploadPendingAttendanceMarks(
+  config?: SyncConsumerConfig
+): Promise<UploadSummary> {
+  const consumerConfig = config ?? syncConfig.consumer;
+  const marks = await listPendingUploads(
+    config?.batchLimit ?? syncConfig.provider.batchLimit
+  );
   if (marks.length === 0) {
     return { attempted: 0, accepted: 0, rejected: 0, deferred: 0 };
   }
@@ -80,7 +88,8 @@ export async function uploadPendingAttendanceMarks(): Promise<UploadSummary> {
   // the batch and only the response was lost, so advancing any row now would be a
   // guess. The cloud's receipt table makes the eventual retry safe.
   const outcomes = (await postAttendanceMarkBatch(
-    marks.map(toWireMark)
+    marks.map(toWireMark),
+    consumerConfig
   )) as WireOutcome[];
 
   const byQueueId = new Map<string, WireOutcome>();

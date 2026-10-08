@@ -19,7 +19,12 @@ export type OutboundMarkStatus = "PENDING" | "SENT" | "REJECTED";
 
 export interface OutboundAttendanceMark {
   queueId: string;
-  attendanceRecordId: number;
+  /**
+   * The local attendance record this upload describes. NULL for a mark against a
+   * cloud-created session, which has no canonical record on the edge (migration
+   * 023); such a mark is addressed on the wire by `sessionSyncId` alone.
+   */
+  attendanceRecordId: number | null;
   sessionSyncId: string;
   studentId: number;
   matricNumber: string;
@@ -30,7 +35,7 @@ export interface OutboundAttendanceMark {
 
 interface OutboundRow {
   queue_id: string;
-  attendance_record_id: string;
+  attendance_record_id: string | null;
   session_sync_id: string;
   student_id: string;
   matric_number: string;
@@ -42,7 +47,8 @@ interface OutboundRow {
 function toMark(row: OutboundRow): OutboundAttendanceMark {
   return {
     queueId: row.queue_id,
-    attendanceRecordId: Number(row.attendance_record_id),
+    attendanceRecordId:
+      row.attendance_record_id === null ? null : Number(row.attendance_record_id),
     sessionSyncId: row.session_sync_id,
     studentId: Number(row.student_id),
     matricNumber: row.matric_number,
@@ -120,6 +126,55 @@ export async function enqueueAttendanceMark(
 
   const row = result.rows[0];
   return row ? (row.queue_id as string) : null;
+}
+
+/**
+ * Queue a mark against a CLOUD-created session for upload (Task 4), using the
+ * CALLER's transaction.
+ *
+ * Unlike `enqueueAttendanceMark`, there is no canonical `attendance_records` row
+ * on the edge to resolve from, so the caller passes the session, student and
+ * derived status explicitly. `attendance_record_id` stays NULL and the row is
+ * addressed on the wire by `sessionSyncId` + `matricNumber`, exactly like a local
+ * mark.
+ *
+ * Exactly-once is enforced by the partial unique index
+ * `one_cloud_mark_per_student_session` (migration 023): a second mark for the
+ * same (student, session) has no ON CONFLICT row to update and is absorbed as a
+ * no-op, which the caller reports as ALREADY_MARKED. That is the concurrency
+ * backstop that makes a race between two marking requests produce exactly one
+ * upload instead of two.
+ *
+ * @returns the queue row's id and its `mark_time`, or null when this student has
+ *          already marked this cloud session.
+ */
+export async function enqueueCloudSessionMark(
+  client: PoolClient,
+  sessionSyncId: string,
+  studentId: number,
+  matricNumber: string,
+  markStatus: AttendanceRecordStatus,
+  markTime: Date
+): Promise<{ queueId: string; markTime: string } | null> {
+  const result = await client.query(
+    `INSERT INTO sync_outbound_attendance_marks
+       (attendance_record_id, session_sync_id, student_id, matric_number, mark_status, mark_time)
+     VALUES (NULL, $1, $2, $3, $4, $5)
+     ON CONFLICT (student_id, session_sync_id)
+       WHERE attendance_record_id IS NULL
+     DO NOTHING
+     RETURNING queue_id, mark_time`,
+    [sessionSyncId, studentId, matricNumber, markStatus, markTime]
+  );
+
+  const row = result.rows[0];
+  if (!row) {
+    return null;
+  }
+  return {
+    queueId: row.queue_id as string,
+    markTime: (row.mark_time as Date).toISOString(),
+  };
 }
 
 /**

@@ -225,15 +225,16 @@ export async function applyChangeBatch(
       await client.query(
         `INSERT INTO sync_attendance_sessions
 (cloud_sync_id, cloud_session_id, cloud_course_offering_id,
-             cloud_lecturer_id,
+             cloud_course_offering_sync_id, cloud_lecturer_id,
              course_code, course_title, lecturer_display_name, lecturer_staff_id,
              start_time, end_time,
              late_threshold_minutes, status, ended_at,
              source_event_cursor, last_synced_at)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, now())
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, now())
          ON CONFLICT (cloud_sync_id) DO UPDATE SET
            cloud_session_id = EXCLUDED.cloud_session_id,
            cloud_course_offering_id = EXCLUDED.cloud_course_offering_id,
+           cloud_course_offering_sync_id = EXCLUDED.cloud_course_offering_sync_id,
            cloud_lecturer_id = EXCLUDED.cloud_lecturer_id,
            course_code = EXCLUDED.course_code,
            course_title = EXCLUDED.course_title,
@@ -250,6 +251,7 @@ export async function applyChangeBatch(
           session.syncId,
           session.cloudSessionId,
           session.cloudCourseOfferingId,
+          session.cloudCourseOfferingSyncId,
           session.cloudLecturerId,
           session.courseCode,
           session.courseTitle,
@@ -293,7 +295,7 @@ export async function applyChangeBatch(
       throw new SyncApplyError(
         `Cannot apply cloud sync event ${currentEvent?.eventId ?? "(unknown)"} ` +
           `(${currentEvent?.entityType ?? "unknown entity"} at cursor ${currentEvent?.cursor ?? "?"}): ` +
-          `a referenced parent (faculty, department, level, course, academic session or semester) is not present on this edge. ` +
+          `a referenced parent (faculty, department, level, course, academic session, semester, course offering or student) is not present on this edge. ` +
           `The cloud emits a parent's CREATED event before anything that references it, so this normally means the edge cursor was advanced past it.`
       );
     }

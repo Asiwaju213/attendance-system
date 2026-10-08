@@ -280,11 +280,12 @@ router.post("/device/enrollment/complete", async (req, res) => {
     }
 
     // Set the device-binding cookie so this device is bound to this student
-    // for password-only returning login. The cookie stores the credential ID
-    // and is HTTP-only, Secure, SameSite=Lax with a 90-day lifetime.
+    // for password-only returning login. The cookie stores the device's opaque
+    // reference (not the credential id, which never leaves the database) and is
+    // HTTP-only, Secure, SameSite=Lax with a 90-day lifetime.
     res.cookie(
       authConfig.deviceBindingCookieName,
-      result.credentialId,
+      result.deviceRef,
       authConfig.deviceBindingCookie
     );
 
@@ -326,6 +327,12 @@ router.post("/device/enrollment/complete", async (req, res) => {
       // still usable for attendance; the student can run the upgrade again.
       discoverable: result.discoverable,
       device: result.device,
+      // One-time secret for binding this device on the K12 edge. Shown once, here,
+      // and never re-issued: the response body is the only place its plaintext ever
+      // exists (only hashes are stored). The device-binding cookie above is set for
+      // THIS origin; the secret is how the student obtains the equivalent cookie on
+      // the other origin without either database exchanging a credential.
+      bootstrapSecret: result.bootstrapSecret,
       sessionCreated,
     });
   } catch (error) {

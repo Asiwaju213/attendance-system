@@ -56,6 +56,31 @@ test("a configured port is respected and keeps the default host", () => {
   assert.equal(config.strictPort, true);
 });
 
+test("HTTPS is opt-in and requires both certificate paths when enabled", () => {
+  const enabled = resolveDevServerConfig({
+    VITE_DEV_HTTPS: "true",
+    VITE_HTTPS_CERT_PATH: "C:/certs/oouattendance.home.arpa+1.pem",
+    VITE_HTTPS_KEY_PATH: "C:/certs/oouattendance.home.arpa+1-key.pem",
+  });
+
+  assert.deepEqual(enabled.https, {
+    cert: "C:/certs/oouattendance.home.arpa+1.pem",
+    key: "C:/certs/oouattendance.home.arpa+1-key.pem",
+  });
+
+  assert.throws(
+    () => resolveDevServerConfig({ VITE_DEV_HTTPS: "true" }),
+    /VITE_HTTPS_CERT_PATH/
+  );
+  assert.throws(
+    () => resolveDevServerConfig({
+      VITE_DEV_HTTPS: "true",
+      VITE_HTTPS_CERT_PATH: "C:/certs/oouattendance.home.arpa+1.pem",
+    }),
+    /VITE_HTTPS_KEY_PATH/
+  );
+});
+
 test("the API proxy target stays configurable and is normalised to a bare origin", () => {
   assert.equal(
     resolveDevServerConfig({ VITE_API_PROXY_TARGET: "http://127.0.0.1:5050" })

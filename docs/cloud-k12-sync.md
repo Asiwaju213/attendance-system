@@ -137,6 +137,36 @@ event on the **same client, before the same COMMIT**:
 If either the session change or the event insert fails, both roll back. There is
 no path where a committed session has no event.
 
+Course registrations follow the same rule:
+
+- `registerCourses` (a student registering for offerings) → `CREATED`, one event
+  per newly inserted registration
+- `adminEnrollStudent` (an admin enrolling a student) → `CREATED`
+
+Both emit inside the transaction that inserts the registration, so a committed
+registration always has its event and a rolled-back one has neither. There is no
+operation in the application that updates or deletes a registration row, so
+`UPDATED` has no business-operation trigger yet for this entity: a future drop
+or completion endpoint would be the place to emit it, and until then the status
+field on the CREATED payload is the only registration state that synchronizes.
+
+Device state follows the same rule:
+
+- `completeDeviceEnrollment` → `CREATED` for the new device, plus `UPDATED` for
+  the device it replaced when an upgrade revokes it. The revocation event is
+  written before the creation event so the edge sees the old device leave
+  `ACTIVE` before the new one enters it — its one-active-device rule would
+  refuse the reverse order.
+- `resetStudentDevice` (admin device reset) → `UPDATED`
+- `resetStudentRegistration` (admin registration reset, which revokes the
+  device with it) → `UPDATED`, only when a device was actually revoked
+
+All three emit on the same client, before the same COMMIT, so a committed
+enrollment or reset always has its event and a rolled-back ceremony has
+neither. Counter updates and `last_seen_at` refreshes during login are device
+*activity*, not device state, and are deliberately not synchronized: they would
+fill the feed with events that change no decision.
+
 There is no "update session fields" operation in Task 1 because the application
 has no endpoint for it: the only two mutations the API permits are start and end.
 `UPDATED` is present in the event vocabulary for a future task, not emitted today.
@@ -324,6 +354,9 @@ Later migrations add:
 | `013` `sync_id` columns, `sync_lecturers` | both | Master-data identity and the lecturer projection. |
 | `014` `sync_outbound_attendance_marks` | consumer | The durable local attendance queue (Task 3). |
 | `015` `sync_inbound_attendance_receipts` | provider | Delivery receipts, so a replayed upload is a no-op (Task 4). |
+| `019` `students.sync_id` | both | Student identity for cloud → edge mirroring. |
+| `020` `course_registrations.sync_id` | both | Registration identity for cloud → edge mirroring. |
+| `021` `student_devices.sync_id`/`device_ref`, `sync_student_devices` | both | Device state identity and the edge's device-state projection. |
 
 `015` is deliberately not a reuse of `sync_processed_events`. That table records
 "this edge applied this feed event at this cursor" and is keyed by consumer; the new
@@ -332,17 +365,72 @@ lifetimes, so conflating them would let a cursor reset silently discard receipts
 
 ## What is never synchronized
 
-- **Students.** Not in either direction. The cloud's enrolment is the authority, and
-  the edge's student rows are its own. A mark is resolved by matriculation number,
-  the one key both databases share.
-- **Users, passwords, sessions, WebAuthn credentials, device bindings.** Never
-  placed in the feed or in an upload, and asserted absent.
+- **Student authentication material.** `password_hash`, `username`,
+  `students.webauthn_user_handle`, every `student_devices` credential column
+  (credential id, public key, counter, transports, AAGUID, discoverable flag,
+  label), challenges and remembered-account tokens are never selected by the
+  emitter and never placed in the feed, and the tests assert their absence.
+  The edge creates each synchronized student with `password_hash = NULL`, so
+  the mirrored row is a profile, not a login.
+- **Users, passwords, sessions, WebAuthn credentials.** Never placed in the
+  feed or in an upload, and asserted absent. What does cross for a device is
+  its opaque `device_ref` and its `ACTIVE`/`REVOKED` status — a device
+  *identity and state*, never its credential — and even that grants nothing on
+  its own: a binding cookie is only ever accepted together with a password
+  verified against the local `users` row.
 - **Attendance records as a projection.** The cloud's `attendance_records` row is
   the canonical one. The edge writes a mark and uploads it; it does not mirror a
   copy back and forth.
 
 Master data (faculties, departments, levels, courses, offerings, academic sessions,
 semesters, lecturers) is synchronized cloud → edge.
+
+Students are synchronized cloud → edge as **profile data only**: the `student`
+entity carries the stable `students.sync_id`, matriculation number, name, account
+status and the department/level references, and the applier writes it into the
+edge's real `users` + `students` rows (creating the local user with
+`password_hash = NULL`). Local identity is not created on the edge: an existing
+local student with the same matriculation number adopts the cloud `sync_id`
+instead of being duplicated, and a matric or `sync_id` collision fails the batch
+rather than guessing which row is the same person. Students are never deleted
+from the edge - an inactive student is carried as `status = 'INACTIVE'`, because
+attendance history references the row.
+
+Course registrations are synchronized cloud → edge into the edge's real
+`course_registrations` table - no second registration table. The `course_registration`
+entity carries the stable `course_registrations.sync_id`, the student and course
+offering as cloud UUID references, and the status (`ENROLLED`, `DROPPED` or
+`COMPLETED`). The applier resolves both parents by UUID, so a registration whose
+student or offering has not synchronized yet fails the batch and holds the cursor
+instead of writing a NULL foreign key. An edge that already holds the pair adopts
+the cloud `sync_id` onto its existing row rather than duplicating it, and a
+`sync_id` or pair collision fails the batch rather than guessing which row is the
+same registration. A registration row holds no credential and no student profile
+beyond the parent reference, so there is no authentication material in this
+entity either, and the tests assert it. The row is never deleted from the edge -
+a dropped or completed registration is carried as `status`, because attendance
+eligibility and history reference it.
+
+Device state is synchronized cloud → edge as a **binding decision only**: the
+`student_device` entity carries the device's opaque `device_ref`, its own
+`sync_id`, the student as a cloud UUID reference, and the status (`ACTIVE` or
+`REVOKED`). The applier writes it into the edge's `sync_student_devices`
+projection — not into `student_devices`, whose rows are credentials enrolled
+locally — so a cloud-enrolled device and a locally enrolled one stay
+distinguishable and a cloud row never sits in front of the attendance
+verification queries. The projection holds no credential id, no public key, no
+counter and no discoverable flag, because no payload field carries one. A
+device event resolves its student by UUID and never creates one, so a device
+whose student has not synchronized yet fails the batch and holds the cursor;
+a device never changes owner, and an event that would move an existing
+projection row onto a different student — or make a second device `ACTIVE` for
+a student who already holds one — fails the batch rather than guessing. What
+the edge uses it for is one lookup: the device-binding cookie holds the
+`device_ref`, and `findStudentLoginCandidateByBinding` resolves it against
+local device rows first and the projection second, so the password login keeps
+working without the credential ever crossing the boundary. The binding is
+still not a credential — it is checked together with a password against the
+local `users` row, exactly as before.
 
 Attendance sessions are synchronized too, without any network or location: a
 session payload carries the offering, lecturer, times, late threshold and status
@@ -375,7 +463,8 @@ npx tsx scripts/backfillMasterDataFeed.ts
 
 It emits dependency-ordered full-state events in one transaction (faculties →
 departments → levels → academic sessions → semesters → courses → offerings →
-lecturers), because an edge cannot write a course offering before the rows it
+lecturers → students → student devices → course registrations), because an edge
+cannot write a course offering, a student or a device state before the rows it
 references exist locally.
 
 ## Running it

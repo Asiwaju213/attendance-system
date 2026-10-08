@@ -289,6 +289,232 @@ export async function findStudentLoginCandidateByCredentialId(
 }
 
 /**
+ * Everything a device-binding login needs, and nothing credential-shaped.
+ *
+ * The lookup this type is returned by answers one question: "does this browser
+ * hold a binding for an ACTIVE device of a student who may sign in". It is the
+ * password-login proof, not a WebAuthn ceremony, so unlike
+ * `StudentDeviceLoginCandidate` it carries no public key, no counter, no
+ * transports and no credential id - those stay behind
+ * `findStudentLoginCandidateByCredentialId`, which the usernameless ceremony
+ * uses.
+ *
+ * `source` says where the binding was resolved from, and it decides one gate:
+ *
+ *   * `"device"` - a local `student_devices` row. `discoverable` is the stored
+ *     flag, and the login gate requires it to be `true` exactly as before, so
+ *     this path's behaviour is unchanged from the credential-id-only lookup.
+ *   * `"replica"` - the edge's `sync_student_devices` projection, which holds a
+ *     cloud device's opaque reference and status and deliberately holds no
+ *     credential. There is no discoverable flag to check, and none is needed:
+ *     the discoverable gate exists because the usernameless ceremony can only
+ *     find a discoverable credential, and this path never runs a ceremony. The
+ *     binding cookie plus the password is the proof, both verified against
+ *     local data.
+ *
+ * `deviceRef` is the value the binding lookup resolves on the next request: the
+ * local device's `device_ref` for a local row (a legacy credential-id cookie is
+ * re-issued as this value on refresh, migrating the browser without a ceremony)
+ * or the cloud's `cloud_device_ref` for a replica row.
+ */
+export interface StudentDeviceBindingCandidate {
+  source: "device" | "replica";
+  deviceRef: string;
+  deviceStatus: string;
+  discoverable: boolean | null;
+  studentId: number;
+  userId: number;
+  userRole: string;
+  userStatus: string;
+  identifier: string;
+}
+
+/**
+ * Resolve a device-binding cookie value to a login candidate.
+ *
+ * Three sources, in priority order, because the cookie has held three different
+ * things over the system's life and all three must keep working:
+ *
+ *   1. `student_devices.device_ref` - what enrollment writes now (migration
+ *      021). A UUID, and the only value that is safe to travel: it identifies
+ *      the device without identifying the credential.
+ *   2. `student_devices.credential_id` - what enrollment wrote before this
+ *      task, and what browsers still holding a pre-upgrade cookie present.
+ *      Kept so the upgrade does not sign anyone out; the login route re-issues
+ *      the cookie as `deviceRef`, so a browser is migrated on its first
+ *      successful login. Credential-id ordering matches
+ *      `findStudentLoginCandidateByCredentialId`: uniqueness is ACTIVE-only
+ *      (migration 009), so a revoked id may exist alongside a re-enrolled one
+ *      and the ACTIVE row wins.
+ *   3. `sync_student_devices.cloud_device_ref` - a cloud-enrolled device seen
+ *      through the sync feed. This is the cross-database case: the edge holds
+ *      the device's state but never its credential, so the binding resolves
+ *      against the projection while the password is still checked against the
+ *      local `users` row by the login route.
+ *
+ * Every branch joins the local `students` and `users` rows, so a binding can
+ * never resolve to a student that does not exist here, and role/status gating
+ * reads the same local columns it always did.
+ *
+ * A cookie value that is not a UUID-shaped string can only be a credential id
+ * (or garbage), so the two UUID-column branches are skipped for it: comparing
+ * arbitrary text against a UUID column raises a database error rather than
+ * matching nothing, and a legacy cookie must resolve - or miss - not crash.
+ */
+
+const UUID_SHAPE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+export async function findStudentLoginCandidateByBinding(
+  binding: string
+): Promise<StudentDeviceBindingCandidate | null> {
+  // A binding cookie from before migration 021 is a credential id - arbitrary
+  // text - and PostgreSQL rejects a non-UUID string compared against a UUID
+  // column, which would turn a legacy cookie into a 500 instead of a lookup
+  // miss. The two UUID branches run only for a UUID-shaped value; the
+  // credential-id branch below is text and always runs.
+  const looksLikeUuid = UUID_SHAPE.test(binding);
+
+  if (looksLikeUuid) {
+    const localDeviceRef = await pool.query(
+      `SELECT 'device'  AS source,
+              d.device_ref AS device_ref,
+              d.status     AS device_status,
+              d.discoverable AS discoverable,
+              s.id         AS student_id,
+              s.matric_number AS identifier,
+              u.id         AS user_id,
+              u.role       AS user_role,
+              u.status     AS user_status
+         FROM student_devices d
+         JOIN students s ON s.id = d.student_id
+         JOIN users u ON u.id = s.user_id
+        WHERE d.device_ref = $1
+        LIMIT 1`,
+      [binding]
+    );
+    const refRow = localDeviceRef.rows[0];
+    if (refRow) return toBindingCandidate(refRow);
+  }
+
+  const localCredential = await pool.query(
+    `SELECT 'device' AS source,
+            d.device_ref AS device_ref,
+            d.status     AS device_status,
+            d.discoverable AS discoverable,
+            s.id         AS student_id,
+            s.matric_number AS identifier,
+            u.id         AS user_id,
+            u.role       AS user_role,
+            u.status     AS user_status
+       FROM student_devices d
+       JOIN students s ON s.id = d.student_id
+       JOIN users u ON u.id = s.user_id
+      WHERE d.credential_id = $1
+      ORDER BY (d.status = 'ACTIVE') DESC, d.id DESC
+      LIMIT 1`,
+    [binding]
+  );
+  const credentialRow = localCredential.rows[0];
+  if (credentialRow) return toBindingCandidate(credentialRow);
+
+  if (looksLikeUuid) {
+    const replica = await pool.query(
+      `SELECT 'replica' AS source,
+              sd.cloud_device_ref AS device_ref,
+              sd.status   AS device_status,
+              NULL        AS discoverable,
+              s.id        AS student_id,
+              s.matric_number AS identifier,
+              u.id        AS user_id,
+              u.role      AS user_role,
+              u.status    AS user_status
+         FROM sync_student_devices sd
+         JOIN students s ON s.id = sd.student_id
+         JOIN users u ON u.id = s.user_id
+        WHERE sd.cloud_device_ref = $1
+        LIMIT 1`,
+      [binding]
+    );
+    const replicaRow = replica.rows[0];
+    if (replicaRow) return toBindingCandidate(replicaRow);
+  }
+
+  return null;
+}
+
+function toBindingCandidate(row: Record<string, unknown>): StudentDeviceBindingCandidate {
+  return {
+    source: row.source as "device" | "replica",
+    deviceRef: row.device_ref as string,
+    deviceStatus: row.device_status as string,
+    discoverable: row.discoverable === null || row.discoverable === undefined
+      ? null
+      : Boolean(row.discoverable),
+    studentId: Number(row.student_id),
+    userId: Number(row.user_id),
+    userRole: row.user_role as string,
+    userStatus: row.user_status as string,
+    identifier: row.identifier as string,
+  };
+}
+
+/**
+ * Spend a one-time device bootstrap secret and return the device reference it
+ * unlocked, or null when it could not be spent.
+ *
+ * This is the only statement that ever changes a bootstrap row, and it is a
+ * single UPDATE so the spend is atomic: two concurrent requests presenting the
+ * same secret race on the row lock and exactly one of them matches
+ * `status = 'PENDING'`, so the secret is spent once and no second caller can
+ * observe a spendable row.
+ *
+ * Every condition is re-checked inside that statement, none of them trusted
+ * from the request:
+ *
+ *   * `secret_hash` matches - the caller proved knowledge of the plaintext.
+ *   * `status = 'PENDING'` - not already spent.
+ *   * `expires_at > now()` - the database's clock, the same clock that stamped
+ *     the expiry at mint time, decides validity.
+ *   * the row's student is THIS caller's student - a secret for one student
+ *     can never be spent by another, even if its hash were known.
+ *   * that student's device in the projection is ACTIVE - a secret minted
+ *     before a revocation cannot bind a revoked device, and revocation takes
+ *     effect for bootstrap the moment it syncs.
+ *
+ * The route has already verified the student's password and account status
+ * against local data; this function adds nothing user-supplied beyond the hash
+ * and the user id. On success the returned value is the opaque device
+ * reference the caller's binding cookie should carry - never the hash, never
+ * anything credential-shaped.
+ */
+export async function consumeStudentDeviceBootstrap(
+  secretHash: string,
+  userId: number
+): Promise<string | null> {
+  const result = await pool.query(
+    `UPDATE sync_student_device_bootstraps b
+        SET status = 'CONSUMED', consumed_at = now(), updated_at = now()
+      WHERE b.secret_hash = $1
+        AND b.status = 'PENDING'
+        AND b.expires_at > now()
+        AND EXISTS (
+          SELECT 1 FROM students s
+           WHERE s.user_id = $2 AND s.id = b.student_id
+        )
+        AND EXISTS (
+          SELECT 1 FROM sync_student_devices d
+           WHERE d.cloud_device_ref = b.cloud_device_ref
+             AND d.student_id = b.student_id
+             AND d.status = 'ACTIVE'
+        )
+      RETURNING b.cloud_device_ref`,
+    [secretHash, userId]
+  );
+  const row = result.rows[0];
+  return row ? (row.cloud_device_ref as string) : null;
+}
+
+/**
  * Re-read a device by id inside a transaction and return it only if it is still ACTIVE.
  * Used to honour a revocation that races an in-flight assertion.
  */

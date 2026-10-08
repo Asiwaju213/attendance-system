@@ -27,10 +27,12 @@ import {
 } from "../services/studentDeviceLoginService";
 import { findSafeUserById } from "../services/userStore";
 import {
-  findStudentLoginCandidateByCredentialId,
+  consumeStudentDeviceBootstrap,
+  findStudentLoginCandidateByBinding,
   findStudentByUserId,
   hasActiveDevice,
   isDiscoverableCredential,
+  type StudentDeviceBindingCandidate,
 } from "../services/studentDeviceStore";
 import { issueEnrollmentGrant } from "../services/studentDeviceEnrollmentGrantStore";
 import {
@@ -62,6 +64,34 @@ import {
   parseVerifyRegistration,
 } from "../validation/studentRegistrationValidation";
 
+/**
+ * The one-time bootstrap secret from the request body, or null when it is not
+ * a usable secret.
+ *
+ * The plaintext is the base64url alphabet only - `generateSessionToken` is the
+ * only producer, so anything outside that alphabet was never minted here and is
+ * refused before it can reach a hash comparison. The length ceiling exists so
+ * an arbitrarily large body cannot be turned into a hash-comparison workload.
+ */
+const MAX_BOOTSTRAP_SECRET_LENGTH = 128;
+
+function parseBootstrapSecret(body: unknown): string | null {
+  if (body === null || typeof body !== "object") {
+    return null;
+  }
+  const value = (body as Record<string, unknown>).secret;
+  if (typeof value !== "string") {
+    return null;
+  }
+  if (value.length < 1 || value.length > MAX_BOOTSTRAP_SECRET_LENGTH) {
+    return null;
+  }
+  if (!/^[A-Za-z0-9_-]+$/.test(value)) {
+    return null;
+  }
+  return value;
+}
+
 const router = Router();
 
 /**
@@ -82,6 +112,31 @@ function rateLimitKey(req: Request): string {
  */
 function sendDeviceLoginFailure(res: Response): void {
   res.status(401).json({ error: INVALID_DEVICE_LOGIN });
+}
+
+/**
+ * Whether a device-binding cookie resolves to a binding a student may actually
+ * sign in with.
+ *
+ * Every gate reads local columns. The one that is source-aware is the
+ * discoverable gate: it applies to a local device row exactly as it always has
+ * (a credential the usernameless ceremony could never find must not gate a
+ * password login either), and is skipped for a replica row, which holds a cloud
+ * device's state and deliberately holds no credential - there is no discoverable
+ * flag to check, and this path runs no ceremony that would need one. The proof
+ * here is the binding cookie plus the password, both verified locally.
+ */
+function bindingGatePasses(candidate: StudentDeviceBindingCandidate): boolean {
+  if (candidate.deviceStatus !== "ACTIVE") return false;
+  if (
+    candidate.source === "device" &&
+    !isDiscoverableCredential({ discoverable: candidate.discoverable })
+  ) {
+    return false;
+  }
+  if (candidate.userRole !== "STUDENT") return false;
+  if (candidate.userStatus !== "ACTIVE") return false;
+  return true;
 }
 
 function buildLoginHandler(role: Role, identifierField: string) {
@@ -173,23 +228,23 @@ async function respondWithEnrollmentDecision(
 //
 // Two distinct proofs are handled here, and the difference is the security boundary:
 //
-//   * A valid device-binding cookie identifies the student from a credential the browser already
-//     holds. Together with the password that is the existing-device proof, so it mints a normal
-//     session exactly as before.
+//   * A valid device-binding cookie identifies the student through an opaque device reference
+//     resolved against local device state. Together with the password that is the
+//     existing-device proof, so it mints a normal session exactly as before.
 //
 //   * No device-binding cookie means only a matric number and a password. That proves nothing
 //     about a device, so it never mints a session. It is either the start of a first-device
 //     enrollment (see `respondWithEnrollmentDecision`) or a rejected attempt to add a second
 //     device while one is already active.
 router.post("/student/login", async (req: Request, res: Response): Promise<void> => {
-  const credentialId = getCookieValue(req, authConfig.deviceBindingCookieName);
+  const bindingValue = getCookieValue(req, authConfig.deviceBindingCookieName);
   let identifier: string;
   let password: string;
-  // The trimmed, verified credential id for a device-bound login. Stays null on the matric +
-  // password path, where no device has been proven.
-  let boundCredentialId: string | null = null;
+  // The device's opaque reference for a device-bound login, taken from the resolved
+  // candidate. Stays null on the matric + password path, where no device has been proven.
+  let boundDeviceRef: string | null = null;
 
-  if (credentialId && typeof credentialId === "string" && credentialId.trim() !== "") {
+  if (bindingValue && typeof bindingValue === "string" && bindingValue.trim() !== "") {
     // Device-binding cookie present: use it to identify the student.
     // The request body only needs to contain the password.
     const parsedPassword = parsePassword(req.body);
@@ -201,16 +256,9 @@ router.post("/student/login", async (req: Request, res: Response): Promise<void>
       return;
     }
     password = parsedPassword;
-    boundCredentialId = credentialId.trim();
 
-    const candidate = await findStudentLoginCandidateByCredentialId(credentialId.trim());
-    if (
-      candidate === null ||
-      candidate.deviceStatus !== "ACTIVE" ||
-      !isDiscoverableCredential(candidate) ||
-      candidate.userRole !== "STUDENT" ||
-      candidate.userStatus !== "ACTIVE"
-    ) {
+    const candidate = await findStudentLoginCandidateByBinding(bindingValue.trim());
+    if (candidate === null || !bindingGatePasses(candidate)) {
       // Device binding is invalid (revoked, non-discoverable, or student inactive).
       // Clear the cookie and fall back to generic failure.
       res.clearCookie(authConfig.deviceBindingCookieName, clearDeviceBindingCookieOptions);
@@ -220,6 +268,11 @@ router.post("/student/login", async (req: Request, res: Response): Promise<void>
     }
 
     identifier = candidate.identifier;
+    // Refresh with the device reference, not with whatever the cookie held. A browser
+    // still presenting a pre-upgrade credential-id cookie is migrated to the opaque
+    // device reference on its first successful login; a replica-resolved binding is
+    // written back unchanged.
+    boundDeviceRef = candidate.deviceRef;
   } else {
     // No device-binding cookie: matric + password only.
     const credentials = parseLoginCredentials(req.body, "matricNumber");
@@ -250,7 +303,7 @@ router.post("/student/login", async (req: Request, res: Response): Promise<void>
 
   // Password alone is not a device proof: hand this to the enrollment decision instead of
   // creating a session.
-  if (boundCredentialId === null) {
+  if (boundDeviceRef === null) {
     await respondWithEnrollmentDecision(res, candidate.id);
     return;
   }
@@ -271,10 +324,11 @@ router.post("/student/login", async (req: Request, res: Response): Promise<void>
     clearEnrollmentGrantCookieOptions
   );
 
-  // Refresh the device-binding cookie for the verified device.
+  // Refresh the device-binding cookie for the verified device. Its value is the device
+  // reference, which is what the lookup above resolves on the next request.
   res.cookie(
     authConfig.deviceBindingCookieName,
-    boundCredentialId,
+    boundDeviceRef,
     authConfig.deviceBindingCookie
   );
 
@@ -441,7 +495,95 @@ router.post("/student/device/verify", async (req: Request, res: Response) => {
   }
 });
 
-router.post("/student/register/verify", async (req: Request, res: Response) => {
+// ------------------------------------------------------------------
+// POST /api/auth/student/device/bootstrap
+//
+// Bind THIS browser to a device the CLOUD enrolled, by spending the one-time
+// bootstrap secret that the cloud's enrollment response showed the student
+// exactly once (migration 022).
+//
+// Three proofs, all verified against local data - no call to the cloud, ever:
+//
+//   * matric number + password   - this caller is the student who owns the
+//                                  secret. Verified with the same timing-safe
+//                                  dummy as every other login.
+//   * the bootstrap secret       - this caller received the enrollment
+//                                  response. Checked as a SHA-256 hash against
+//                                  the edge's replica row; the plaintext never
+//                                  reaches the database.
+//   * the replica's own checks   - inside one atomic UPDATE: unexpired,
+//                                  unspent, student's device ACTIVE.
+//
+// On success the device-binding cookie is set to the device reference, so the
+// next /student/login on this browser takes the existing-device path exactly as
+// if the enrollment had happened here. No session is minted: a bootstrap proves
+// possession of a secret, not a sign-in, and every login after this one still
+// requires the password.
+//
+// Every refusal is the same generic 401 as a wrong password
+// (`INVALID_CREDENTIALS`), so this endpoint cannot be used to learn whether a
+// secret, a student or a device exists. Like /student/login it has no rate
+// limiter: the secret is single-use and expires, and each guess costs one
+// password check at most.
+// ------------------------------------------------------------------
+router.post(
+  "/student/device/bootstrap",
+  async (req: Request, res: Response): Promise<void> => {
+    const credentials = parseLoginCredentials(req.body, "matricNumber");
+    const secret = parseBootstrapSecret(req.body);
+    if (!credentials || !secret) {
+      res.status(400).json({
+        error: "INVALID_REQUEST",
+        message: "A valid matric number, password and secret are required.",
+      });
+      return;
+    }
+
+    const candidate = await findLoginCandidate(
+      "STUDENT",
+      credentials.identifier
+    );
+    if (!candidate) {
+      // Burn a password comparison anyway so an unknown matric number and a
+      // wrong password are indistinguishable from here on.
+      await verifyPasswordOrDummy(null, credentials.password);
+      sendDeviceLoginFailure(res);
+      return;
+    }
+
+    const passwordMatches = await verifyPasswordOrDummy(
+      candidate.password_hash,
+      credentials.password
+    );
+    if (!passwordMatches || candidate.status !== "ACTIVE") {
+      sendDeviceLoginFailure(res);
+      return;
+    }
+
+    // The whole spend in one statement: hash match, not-yet-spent,
+    // not-expired, owned by this student, device ACTIVE. Null means any of
+    // those failed, and the caller cannot tell which.
+    const deviceRef = await consumeStudentDeviceBootstrap(
+      hashSessionToken(secret),
+      candidate.id
+    );
+    if (deviceRef === null) {
+      sendDeviceLoginFailure(res);
+      return;
+    }
+
+    // The binding cookie this browser would have received from a local
+    // enrollment, with the same attributes and lifetime.
+    res.cookie(
+      authConfig.deviceBindingCookieName,
+      deviceRef,
+      authConfig.deviceBindingCookie
+    );
+    res.status(200).json({ deviceBound: true });
+  }
+);
+
+router.post("/student/register/verify", async (req: Request, res: Response): Promise<void> => {
   const input = parseVerifyRegistration(req.body);
   if (!input) {
     res
@@ -546,22 +688,17 @@ router.post("/student/remembered/clear", async (_req: Request, res: Response) =>
 // GET /api/auth/student/device-binding
 // Check if there is a valid device binding for this browser.
 // Returns whether the device is enrolled and bound to a student.
-// The binding is determined by the device-binding cookie (credential ID)
-// and verified against the database (ACTIVE, discoverable, student ACTIVE).
+// The binding is determined by the device-binding cookie (device reference, or a
+// pre-upgrade credential id) and verified against local data (ACTIVE,
+// discoverable for a local device, student ACTIVE).
 router.get("/student/device-binding", async (req: Request, res: Response) => {
-  const credentialId = getCookieValue(req, authConfig.deviceBindingCookieName);
-  if (!credentialId || typeof credentialId !== "string" || credentialId.trim() === "") {
+  const bindingValue = getCookieValue(req, authConfig.deviceBindingCookieName);
+  if (!bindingValue || typeof bindingValue !== "string" || bindingValue.trim() === "") {
     return res.status(200).json({ hasDeviceBinding: false });
   }
 
-  const candidate = await findStudentLoginCandidateByCredentialId(credentialId.trim());
-  if (
-    candidate === null ||
-    candidate.deviceStatus !== "ACTIVE" ||
-    !isDiscoverableCredential(candidate) ||
-    candidate.userRole !== "STUDENT" ||
-    candidate.userStatus !== "ACTIVE"
-  ) {
+  const candidate = await findStudentLoginCandidateByBinding(bindingValue.trim());
+  if (candidate === null || !bindingGatePasses(candidate)) {
     // Device binding is invalid (revoked, non-discoverable, or student inactive).
     // Clear the cookie so the frontend falls back to normal login.
     res.clearCookie(authConfig.deviceBindingCookieName, clearDeviceBindingCookieOptions);

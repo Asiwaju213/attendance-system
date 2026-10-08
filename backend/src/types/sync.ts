@@ -27,6 +27,10 @@ export const SYNC_ENTITY_TYPES = [
   "semester",
   "course_offering",
   "lecturer",
+  "student",
+  "course_registration",
+  "student_device",
+  "student_device_bootstrap",
 ] as const;
 
 /**
@@ -67,6 +71,12 @@ export interface SyncedPayloadBase {
  * entities once they are synchronized; they are NOT local identities and must
  * never be used to address a local row.
  *
+ * `cloudCourseOfferingSyncId` is the exception that makes a cloud session markable
+ * on the edge (Task 4): it is the cloud's `course_offerings.sync_id` UUID, the only
+ * identity that means the same thing on both databases, and it is what the edge
+ * joins the projection to its LOCAL `course_offerings` row with. It is written by
+ * the apply service from the feed and is never read from a client request.
+ *
  * `lecturerDisplayName` and `lecturerStaffId` are denormalized so the edge can
  * show who owns a session without holding any row in its `users` table (see
  * migration 013).
@@ -78,6 +88,7 @@ export interface SyncedAttendanceSession extends SyncedPayloadBase {
   syncId: string;
   cloudSessionId: number;
   cloudCourseOfferingId: number;
+  cloudCourseOfferingSyncId: string;
   cloudLecturerId: number;
   courseCode: string;
   courseTitle: string;
@@ -177,6 +188,122 @@ export interface SyncedLecturer extends SyncedPayloadBase {
 }
 
 /**
+ * The synchronized state of one cloud student.
+ *
+ * Mirrored into the edge's real `users` + `students` rows, so the payload
+ * carries exactly what those two rows are made of and nothing else: the stable
+ * `syncId` from `students.sync_id`, the business key (`matricNumber`), the
+ * display name and account status from `users`, and the two parent references
+ * the edge resolves by UUID.
+ *
+ * Deliberately absent, and asserted absent by the tests: `passwordHash`,
+ * `username`, `webauthnUserHandle`, every WebAuthn credential field
+ * (`credentialId`, `publicKey`, `counter`, `challenge`), device binding
+ * material and remembered-account tokens. The edge creates its own local
+ * credential state (`password_hash = NULL`, a locally generated
+ * `webauthn_user_handle`), so nothing here can become an authentication secret
+ * on the second database.
+ *
+ * `status` mirrors `users.status`, which migrations 001/005 restrict to these
+ * three values. Inactivity is carried as state rather than as a delete: an
+ * inactive student keeps the local row because attendance history references
+ * it.
+ */
+export interface SyncedStudent extends SyncedPayloadBase {
+  syncId: string;
+  cloudStudentId: number;
+  matricNumber: string;
+  name: string;
+  status: "ACTIVE" | "INACTIVE" | "PENDING";
+  cloudDepartmentSyncId: string;
+  cloudLevelSyncId: string;
+}
+
+/**
+ * The synchronized state of one cloud course registration.
+ *
+ * A registration is the pair (student, course offering) plus its status, so
+ * the payload carries the two parents as cloud UUID references the edge
+ * resolves against its own `students` and `course_offerings` rows, and the
+ * registration's own `syncId` (`course_registrations.sync_id`) as the identity
+ * the edge upserts against.
+ *
+ * `cloudRegistrationId` is the cloud's integer id, carried for diagnostics
+ * only; it is never treated as a local identity. Deliberately absent, and
+ * asserted absent by the tests: any identifier of the student beyond the parent
+ * reference (matric number, name), any password/session/WebAuthn/device field,
+ * and any credential material - none of which exists in a registration row.
+ */
+export interface SyncedCourseRegistration extends SyncedPayloadBase {
+  syncId: string;
+  cloudRegistrationId: number;
+  cloudStudentSyncId: string;
+  cloudCourseOfferingSyncId: string;
+  /** Restricted by the `course_registrations` CHECK constraint to these three. */
+  status: "ENROLLED" | "DROPPED" | "COMPLETED";
+}
+
+/**
+ * The synchronized state of one cloud device binding.
+ *
+ * The whole point of this payload is what it is NOT: it carries no credential.
+ * No credential id, no public key, no counter, no transports, no AAGUID, no
+ * discoverable flag, no challenge and no cookie or session material - none of
+ * those fields exist on a `student_devices` row that the emitter selects, so
+ * none of them can enter the feed. What crosses the boundary is a device
+ * STATE: this opaque device reference, for that student, ACTIVE or REVOKED.
+ *
+ * `cloudDeviceRef` is the device's stable opaque identity (migration 021). It
+ * is what a device-binding cookie may carry and what the edge resolves against
+ * its `sync_student_devices` replica - the minimum a login needs to answer
+ * "does this browser still hold a binding for an ACTIVE device of this
+ * student" without either database ever exchanging a WebAuthn credential.
+ *
+ * `syncId` is the device row's own cross-database identity
+ * (`student_devices.sync_id`), which the edge upserts against so a
+ * re-delivered or status-changed event resolves to the same replica row.
+ * `cloudStudentSyncId` is the parent reference the edge resolves against its
+ * mirrored `students` rows; a device event never creates a student.
+ */
+export interface SyncedStudentDevice extends SyncedPayloadBase {
+  syncId: string;
+  cloudDeviceRef: string;
+  cloudStudentSyncId: string;
+  /** Restricted by the `sync_student_devices` CHECK constraint to these two. */
+  status: "ACTIVE" | "REVOKED";
+}
+
+/**
+ * The synchronized state of one one-time device bootstrap secret.
+ *
+ * What crosses the boundary here is a SHA-256 hash and nothing else. The
+ * plaintext secret exists in exactly one place for its whole life: the HTTP
+ * response body of the cloud's enrollment completion, which the student
+ * immediately spends on the edge. It is never stored, never logged, never
+ * audited and never synchronized - only its hash is, because the edge must be
+ * able to recognize the plaintext the student types without ever holding it.
+ *
+ * `cloudDeviceRef` and `cloudStudentSyncId` bind the secret to one device of
+ * one student (migration 022), so a hash can only ever unlock the binding it
+ * was minted for. `status` is PENDING at emission - the cloud only ever learns
+ * of a secret's birth, never its consumption, because sync is one-directional.
+ *
+ * Deliberately absent, and asserted absent by the tests: the plaintext itself,
+ * any password or session material, any WebAuthn credential field, and the
+ * resolved local student id (the edge derives that from `cloudStudentSyncId`).
+ */
+export interface SyncedStudentDeviceBootstrap extends SyncedPayloadBase {
+  syncId: string;
+  cloudDeviceRef: string;
+  cloudStudentSyncId: string;
+  /** SHA-256 hex of the one-time secret. Never the secret itself. */
+  secretHash: string;
+  /** Restricted by the `sync_student_device_bootstraps` CHECK constraint. */
+  status: "PENDING" | "CONSUMED";
+  expiresAt: string;
+}
+
+/**
  * Union of every payload the feed may carry.
  *
  * The applier dispatches on `entityType` and narrows this union, so adding an
@@ -191,7 +318,11 @@ export type SyncedEntityPayload =
   | SyncedAcademicSession
   | SyncedSemester
   | SyncedCourseOffering
-  | SyncedLecturer;
+  | SyncedLecturer
+  | SyncedStudent
+  | SyncedCourseRegistration
+  | SyncedStudentDevice
+  | SyncedStudentDeviceBootstrap;
 
 /**
  * One entry in the cloud's append-only change feed.

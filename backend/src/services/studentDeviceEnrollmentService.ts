@@ -3,8 +3,9 @@ import type {
   RegistrationResponseJSON,
 } from "@simplewebauthn/server";
 import { webauthnConfig } from "../config/webauthn";
+import { authConfig } from "../config/auth";
 import { pool } from "../db/pool";
-import { hashSessionToken } from "../lib/sessions";
+import { generateSessionToken, hashSessionToken } from "../lib/sessions";
 import {
   createStudentDeviceRegistrationOptions,
   verifyStudentRegistration,
@@ -18,6 +19,7 @@ import {
   lockActiveDeviceForEnrollment,
   revokeDeviceRowForReplacement,
 } from "./studentDeviceStore";
+import { appendStudentDeviceEvent, appendStudentDeviceBootstrapEvent } from "./syncMasterDataEmitters";
 
 /**
  * What kind of credential ceremony the student is starting.
@@ -130,6 +132,21 @@ export type CompleteDeviceEnrollmentResult =
   | {
       ok: true;
       credentialId: string;
+      /**
+       * The device's opaque stable reference (migration 021). This - not the credential id -
+       * is what the device-binding cookie carries and what the login binding lookup resolves
+       * first, so the credential id never has to leave the database that enrolled it.
+       */
+      deviceRef: string;
+      /**
+       * The one-time bootstrap secret for this device (plaintext, shown exactly
+       * once in this response). The student spends it on the K12 edge's
+       * `/student/device/bootstrap` endpoint to bind that browser; only its
+       * SHA-256 hash is stored (cloud and edge) and only the hash crosses the
+       * sync boundary. Never logged, never audited, never re-issued: a second
+       * secret is a second enrollment.
+       */
+      bootstrapSecret: string;
       /**
        * The credential this enrolment replaced, when the ceremony was an UPGRADE. The old row
        * is REVOKED, never deleted. `null` for a plain ENROLL.
@@ -440,6 +457,11 @@ export async function completeDeviceEnrollment(
         await client.query("ROLLBACK");
         return { ok: false, code: "DEVICE_ALREADY_ENROLLED" };
       }
+      // Publish the revocation BEFORE the replacement's creation: the edge keeps at most
+      // one ACTIVE replica row per student, so it has to see this device leave ACTIVE
+      // state before it sees the new one enter it. Emitted on the same client, so the
+      // two events and the two row changes commit or roll back together.
+      await appendStudentDeviceEvent(client, "UPDATED", existingDevice.id);
     }
 
     const inserted = await client.query(
@@ -447,7 +469,7 @@ export async function completeDeviceEnrollment(
          (student_id, credential_id, credential_public_key, counter,
           transports, cred_type, aaguid, label, discoverable)
        VALUES ($1, $2, $3, $4, $5, 'public-key', $6, $7, $8)
-       RETURNING id, enrolled_at`,
+       RETURNING id, device_ref, enrolled_at`,
       [
         student.studentId,
         verification.credential.id,
@@ -464,6 +486,43 @@ export async function completeDeviceEnrollment(
       ]
     );
     const deviceRow = inserted.rows[0];
+
+    // A committed enrollment always has its event: this runs on the same client,
+    // before the same COMMIT, so a rolled-back ceremony leaves no event behind.
+    await appendStudentDeviceEvent(client, "CREATED", Number(deviceRow.id));
+
+    // Mint the one-time bootstrap secret for the K12 edge, in the same
+    // transaction as the device it belongs to. Two invariants live here:
+    //
+    //   * Only the SHA-256 hash is stored - in THIS database and in the one the
+    //     event below syncs to. The plaintext exists only in the value returned
+    //     to the caller of this function, which the route puts in the response
+    //     body and nowhere else (not in an audit log, not in a session).
+    //   * The event is appended on the same client, after the device's CREATED
+    //     event, so the feed delivers device-then-secret in order and the edge
+    //     can resolve the parent before the bootstrap that binds to it.
+    //
+    // The expiry is a database-computed timestamp plus the configured lifetime,
+    // so the row's ceiling is set by the same clock that will later enforce it
+    // in the consume statement - no client-supplied time is involved.
+    const bootstrapSecret = generateSessionToken();
+    const mintedBootstrap = await client.query(
+      `INSERT INTO student_device_bootstraps
+         (student_id, device_id, secret_hash, expires_at)
+       VALUES ($1, $2, $3, now() + ($4 * interval '1 millisecond'))
+       RETURNING sync_id`,
+      [
+        student.studentId,
+        Number(deviceRow.id),
+        hashSessionToken(bootstrapSecret),
+        authConfig.deviceBootstrapLifetimeMs,
+      ]
+    );
+    await appendStudentDeviceBootstrapEvent(
+      client,
+      "CREATED",
+      mintedBootstrap.rows[0].sync_id as string
+    );
 
     if (isUpgrade && existingDevice !== null) {
       await client.query(
@@ -492,6 +551,8 @@ export async function completeDeviceEnrollment(
     return {
       ok: true,
       credentialId: verification.credential.id,
+      deviceRef: deviceRow.device_ref as string,
+      bootstrapSecret,
       replacedCredentialId:
         isUpgrade && existingDevice !== null ? existingDevice.credential_id : null,
       discoverable: verification.discoverable,
