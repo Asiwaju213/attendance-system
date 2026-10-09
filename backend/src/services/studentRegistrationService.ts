@@ -42,20 +42,52 @@ function isUniqueViolation(error: unknown): boolean {
   );
 }
 
+/**
+ * Find an account this matric number may claim by choosing a local password.
+ *
+ * Two eligibility paths, and the difference matters:
+ *
+ *   * `PENDING` + `password_hash IS NULL` - the original self-registration path for
+ *     a bulk-imported student who has never signed in here.
+ *   * `ACTIVE` + `password_hash IS NULL` + a live cloud-enrollment bootstrap - a
+ *     student who was created and device-enrolled on the CLOUD and synchronized
+ *     here. The local `users` row the applier writes has `password_hash = NULL`
+ *     (migration 019's applier), so no password this edge could ever verify, and
+ *     the student is left unable to sign in at all.
+ *
+ * `password_hash IS NULL` is the load-bearing condition on BOTH paths and is
+ * checked on read and again on write. It is what stops this flow from being a way
+ * to take over or re-key an account that already has a password, and it is what
+ * makes the claim single-use.
+ *
+ * The bootstrap record is the eligibility marker, not an authentication: anyone
+ * may name a matric number, so eligibility is deliberately narrow. `PENDING` and
+ * unexpired means "a device the cloud enrolled for this student, whose secret is
+ * still live" - the population that actually needs this path, and nothing wider.
+ */
 async function findPendingStudent(matricNumber: string): Promise<PendingStudentRow | null> {
   const result = await pool.query(
     `SELECT u.id AS user_id, u.name, s.matric_number,
             d.id AS department_id, d.name AS department_name, d.code AS department_code,
             l.id AS level_id, l.name AS level_name
-     FROM students s
-     JOIN users u ON u.id = s.user_id
-     JOIN departments d ON d.id = s.department_id
-     JOIN levels l ON l.id = s.level_id
-     WHERE s.matric_number = $1
-       AND u.role = 'STUDENT'
-       AND u.status = 'PENDING'
-       AND u.password_hash IS NULL
-     LIMIT 1`,
+       FROM students s
+       JOIN users u ON u.id = s.user_id
+       JOIN departments d ON d.id = s.department_id
+       JOIN levels l ON l.id = s.level_id
+      WHERE s.matric_number = $1
+        AND u.role = 'STUDENT'
+        AND u.password_hash IS NULL
+        AND (
+          u.status = 'PENDING'
+          OR EXISTS (
+            SELECT 1
+              FROM sync_student_device_bootstraps b
+             WHERE b.student_id = s.id
+               AND b.status = 'PENDING'
+               AND b.expires_at > now()
+          )
+        )
+      LIMIT 1`,
     [matricNumber]
   );
   const row = result.rows[0];
@@ -172,10 +204,40 @@ export async function completeRegistration(
       return { ok: false, code: "INVALID_REGISTRATION_CHALLENGE" };
     }
 
+    // The password is written by a single guarded UPDATE, so the claim is
+    // single-use without depending on the caller: `password_hash IS NULL` means an
+    // account that already has a local password can never be re-keyed from here,
+    // no matter how many challenges were issued for it. Two concurrent
+    // completions therefore serialize on the row lock, the winner writes, and the
+    // loser re-evaluates the predicate against the committed row and matches
+    // nothing.
+    //
+    // The same eligibility the challenge was issued under is re-checked in the
+    // same statement, because a challenge is a nonce rather than a proof: the
+    // eligibility conditions may have changed between issuance and completion
+    // (an admin set a password, the last live bootstrap was spent or expired).
+    // Trusting the issuance decision alone would let a stale challenge set a
+    // password on an account that is no longer eligible.
+    //
+    // `SET status = 'ACTIVE'` is the whole of the PENDING path's activation and a
+    // no-op write for a student who is already ACTIVE, so both paths converge on
+    // one statement.
     const activated = await client.query(
-      `UPDATE users
-       SET status = 'ACTIVE', password_hash = $2
-       WHERE id = $1 AND status = 'PENDING' AND password_hash IS NULL
+      `UPDATE users u
+        SET status = 'ACTIVE', password_hash = $2
+       WHERE u.id = $1
+         AND u.password_hash IS NULL
+         AND (
+           u.status = 'PENDING'
+           OR EXISTS (
+             SELECT 1
+               FROM students s
+               JOIN sync_student_device_bootstraps b ON b.student_id = s.id
+              WHERE s.user_id = u.id
+                AND b.status = 'PENDING'
+                AND b.expires_at > now()
+           )
+         )
        RETURNING id`,
       [userId, passwordHash]
     );

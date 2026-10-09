@@ -27,7 +27,7 @@ function formatMatricNumber(value: string): string {
 function matricErrorMessage(error: unknown): string {
   if (error instanceof ApiError) {
     if (error.status === 404) {
-      return "No pending registration found for this matric number. It may already be registered, inactive, or not exist.";
+      return "This account is not available for password setup. It may already have a password set, not exist, or have no enrolled device.";
     }
     if (error.status === 400) {
       return "A valid matric number is required.";
@@ -182,11 +182,11 @@ export function StudentRegisterPage() {
   return (
     <AuthShell
       title="Student Registration"
-      eyebrow="Account activation"
-      description="Activate your student account to register for courses and mark attendance."
+      eyebrow="Account setup"
+      description="Set a password for your student account to sign in, register for courses, and mark attendance."
       subtitle={
         step === "matric"
-          ? "Enter the matric number on your admission letter."
+          ? "Enter your student matric number."
           : "Check the details below, then choose a password."
       }
       footer={
