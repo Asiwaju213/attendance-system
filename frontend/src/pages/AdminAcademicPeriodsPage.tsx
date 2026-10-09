@@ -283,9 +283,9 @@ export function AdminAcademicPeriodsPage() {
       <header className="app-header admin-page-header">
         <div>
           <p className="admin-page-header__eyebrow">Administration</p>
-          <h1>Academic Sessions &amp; Semesters</h1>
+          <h1>Academic sessions and semesters</h1>
           <p className="app-header__sub">
-            Manage the active academic session and the two supported semesters.
+            The active academic session, and the two semester names.
           </p>
         </div>
         <nav className="app-header__nav" aria-label="Admin navigation">
@@ -294,10 +294,10 @@ export function AdminAcademicPeriodsPage() {
       </header>
 
       <section className="app-card app-card--wide" aria-labelledby="sessions-heading">
-        <h2 id="sessions-heading">Academic Sessions</h2>
+        <h2 id="sessions-heading">Academic sessions</h2>
         <p className="note">
-          Activating an academic session deactivates the previous one. Students
-          register against the active session.
+          Activating a session deactivates the previous one. Students register
+          against the active session.
         </p>
 
         {sessionsError !== null ? (
@@ -321,7 +321,7 @@ export function AdminAcademicPeriodsPage() {
 
         {sessions !== null && sessions.length === 0 ? (
           <div className="admin-empty">
-            <p className="form-error admin-empty__message" role="status">
+            <p className="admin-empty__message" role="status">
               No academic sessions yet.
             </p>
           </div>
@@ -332,8 +332,8 @@ export function AdminAcademicPeriodsPage() {
             <table className="admin-table">
               <thead>
                 <tr>
-                  <th scope="col">Academic session</th>
-                  <th scope="col">Status</th>
+<th scope="col">Academic Session</th>
+                    <th scope="col">Status</th>
                   <th scope="col">Created</th>
                   <th scope="col">Actions</th>
                 </tr>
@@ -403,13 +403,7 @@ export function AdminAcademicPeriodsPage() {
                     <td>{formatDateTime(session.createdAt)}</td>
                     <td>
                       {editingId === session.id ? (
-                        <button
-                          type="button"
-                          className="secondary-button"
-                          disabled
-                        >
-                          Editing…
-                        </button>
+                        <span className="admin-table__secondary">Editing…</span>
                       ) : (
                         <div className="confirm-row">
                           <button
@@ -492,8 +486,8 @@ export function AdminAcademicPeriodsPage() {
       <section className="app-card app-card--wide" aria-labelledby="semesters-heading">
         <h2 id="semesters-heading">Semesters</h2>
         <p className="note">
-          Only First Semester and Second Semester are supported. A semester name
-          can only be switched to the other supported name.
+          Only First Semester and Second Semester are supported. A semester can
+          only be renamed to the other supported name.
         </p>
 
         {semestersError !== null ? (
@@ -517,7 +511,7 @@ export function AdminAcademicPeriodsPage() {
 
         {semesters !== null && semesters.length === 0 ? (
           <div className="admin-empty">
-            <p className="form-error admin-empty__message" role="status">
+            <p className="admin-empty__message" role="status">
               No semesters found.
             </p>
           </div>
@@ -594,9 +588,7 @@ export function AdminAcademicPeriodsPage() {
                     <td>{formatDateTime(semester.createdAt)}</td>
                     <td>
                       {editingSemesterId === semester.id ? (
-                        <button type="button" className="secondary-button" disabled>
-                          Editing…
-                        </button>
+                        <span className="admin-table__secondary">Editing…</span>
                       ) : (
                         <button
                           type="button"

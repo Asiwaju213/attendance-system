@@ -9,7 +9,7 @@ import { withLoginMutex } from "./helpers/login-mutex";
 const HISTORY_API = "**/api/student/attendance/history";
 const COURSE_CODE = "E2E-101";
 const COURSE_TITLE = "E2E Computer Science 101";
-const COURSE_REGION = new RegExp(`${COURSE_CODE} — ${COURSE_TITLE}`);
+const COURSE_REGION = new RegExp(`${COURSE_CODE} · ${COURSE_TITLE}`);
 
 const STATUS_LABELS: Record<string, string> = {
   PRESENT: "Present",
@@ -161,7 +161,7 @@ test("a student can navigate to Attendance History from Student Home", async ({
 
   await expect(page).toHaveURL(/\/app\/student\/attendance-history$/);
   await expect(
-    page.getByRole("heading", { level: 1, name: "Attendance History" })
+    page.getByRole("heading", { level: 1, name: "Attendance history" })
   ).toBeVisible();
 });
 
@@ -174,7 +174,7 @@ test("a student can directly load the attendance history page", async ({
 
   await expect(page).toHaveURL(/\/app\/student\/attendance-history$/);
   await expect(
-    page.getByRole("heading", { level: 1, name: "Attendance History" })
+    page.getByRole("heading", { level: 1, name: "Attendance history" })
   ).toBeVisible();
   await expect(courseRegion(page)).toBeVisible();
 });
@@ -221,7 +221,7 @@ test("a real authenticated student sees the real attendance history from the bac
 
     const region = courseRegion(page);
     await expect(region.getByRole("heading", { level: 2 })).toHaveText(
-      `${course!.courseCode} — ${course!.courseTitle}`
+      `${course!.courseCode} · ${course!.courseTitle}`
     );
     await expect(region).toContainText(course!.academicSession);
     await expect(region).toContainText(course!.semester);
@@ -259,7 +259,7 @@ test("course information is rendered correctly", async ({ page }) => {
   await expect(courseRegion(page)).toBeVisible();
   await expect(
     courseRegion(page).getByRole("heading", { level: 2 })
-  ).toHaveText("E2E-101 — E2E Computer Science 101");
+  ).toHaveText("E2E-101 · E2E Computer Science 101");
   await expect(courseRegion(page)).toContainText("E2E Computer Science 101");
 });
 
@@ -495,7 +495,7 @@ test("the page is responsive on a mobile viewport without horizontal overflow", 
   await page.goto("/app/student/attendance-history");
 
   await expect(
-    page.getByRole("heading", { level: 1, name: "Attendance History" })
+    page.getByRole("heading", { level: 1, name: "Attendance history" })
   ).toBeVisible();
   await expect(courseRegion(page)).toBeVisible();
   await expect(

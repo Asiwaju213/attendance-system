@@ -118,18 +118,18 @@ test("a lecturer can navigate to a completed session report from the history", a
   await loginAsLecturer(page);
   await page.goto("/app/lecturer/attendance");
   await expect(
-    page.getByRole("heading", { level: 1, name: "Attendance Sessions" })
+    page.getByRole("heading", { level: 1, name: "Attendance sessions" })
   ).toBeVisible();
 
   const historyItem = page
     .locator(".session-list__item")
     .filter({ hasText: COURSE_TITLE });
   await expect(historyItem).toBeVisible();
-  await historyItem.getByRole("link", { name: "View Attendance" }).click();
+  await historyItem.getByRole("link", { name: "View attendance report" }).click();
 
   await expect(page).toHaveURL(/\/app\/lecturer\/attendance-reports\/session\/\d+$/);
   await expect(
-    page.getByRole("heading", { level: 1, name: "Session Attendance Report" })
+    page.getByRole("heading", { level: 1, name: "Session attendance report" })
   ).toBeVisible();
 });
 
@@ -140,7 +140,7 @@ test("a lecturer can directly load the session report page", async ({
   const sessionId = await getEndedSessionId(page);
   await page.goto(`/app/lecturer/attendance-reports/session/${sessionId}`);
   await expect(
-    page.getByRole("heading", { level: 1, name: "Session Attendance Report" })
+    page.getByRole("heading", { level: 1, name: "Session attendance report" })
   ).toBeVisible();
   await expect(page.getByText(/Course: E2E-103/)).toBeVisible();
 });
@@ -152,7 +152,7 @@ test("session metadata is displayed correctly", async ({
   const sessionId = await getEndedSessionId(page);
   await page.goto(`/app/lecturer/attendance-reports/session/${sessionId}`);
   await expect(
-    page.getByRole("heading", { level: 1, name: "Session Attendance Report" })
+    page.getByRole("heading", { level: 1, name: "Session attendance report" })
   ).toBeVisible();
 
   await expect(page.getByText(/Course: E2E-103/)).toBeVisible();
@@ -297,17 +297,17 @@ test("session-by-session attendance details are displayed", async ({
   const presentRow = rows.filter({ hasText: "E2E/STU/0001" });
   await expect(presentRow.locator(".history-status")).toHaveText("Present");
   // Check the 4th column (Marked At timestamp) for the present student
-  await expect(presentRow.locator("td").nth(3)).not.toHaveText("—");
+  await expect(presentRow.locator("td").nth(3)).not.toHaveText("Not available");
 
   const lateRow = rows.filter({ hasText: "E2E/STU/0002" });
   await expect(lateRow.locator(".history-status")).toHaveText("Late");
   // Check the 4th column (Marked At timestamp) for the late student
-  await expect(lateRow.locator("td").nth(3)).not.toHaveText("—");
+  await expect(lateRow.locator("td").nth(3)).not.toHaveText("Not available");
 
   const absentRow = rows.filter({ hasText: "E2E/STU/0003" });
   await expect(absentRow.locator(".history-status")).toHaveText("Absent");
-  // Absent student should have "—" in the Marked At column
-  await expect(absentRow.locator("td").nth(3)).toHaveText("—");
+  // Absent student shows "Not available" in the Marked At column
+  await expect(absentRow.locator("td").nth(3)).toHaveText("Not available");
 });
 
 test("report API response includes all required fields", async ({
@@ -395,8 +395,8 @@ test("lecturer can navigate from lecturer home to session report", async ({
     .locator(".session-list__item")
     .filter({ hasText: COURSE_TITLE });
   await expect(historyItem.first()).toBeVisible();
-  await historyItem.first().getByRole("link", { name: "View Attendance" }).click();
+  await historyItem.first().getByRole("link", { name: "View attendance report" }).click();
   await expect(
-    page.getByRole("heading", { level: 1, name: "Session Attendance Report" })
+    page.getByRole("heading", { level: 1, name: "Session attendance report" })
   ).toBeVisible();
 });

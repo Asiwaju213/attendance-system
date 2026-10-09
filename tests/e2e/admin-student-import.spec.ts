@@ -37,7 +37,7 @@ async function openImportPage(page: Page): Promise<void> {
   await loginAsAdmin(page);
   await page.goto("/app/admin/students/import");
   await expect(
-    page.getByRole("heading", { level: 1, name: "Student Import" })
+    page.getByRole("heading", { level: 1, name: "Student import" })
   ).toBeVisible();
 }
 
@@ -63,7 +63,7 @@ async function chooseImportTarget(page: Page): Promise<void> {
 async function previewFile(page: Page, buffer: Buffer, name = "students.xlsx"): Promise<void> {
   await chooseImportTarget(page);
   await setWorkbook(page, buffer, name);
-  await page.getByRole("button", { name: "Preview Import" }).click();
+  await page.getByRole("button", { name: "Preview import" }).click();
 }
 
 function importSummaryStat(page: Page, label: string): Locator {
@@ -103,7 +103,7 @@ test("an unauthenticated user is redirected to the admin login page", async ({ p
 
   await expect(page).toHaveURL(/\/staff\/admin\/login$/);
   await expect(
-    page.getByRole("heading", { level: 1, name: "Admin Login" })
+    page.getByRole("heading", { level: 1, name: "Administrator Login" })
   ).toBeVisible();
 });
 
@@ -146,7 +146,7 @@ test("the admin home links to student import and the page renders", async ({
 }) => {
   await loginAsAdmin(page);
 
-  const link = page.getByRole("link", { name: "Student Import" });
+  const link = page.getByRole("link", { name: "Student import" });
   await expect(link).toBeVisible();
   await expect(link).toHaveAttribute("href", "/app/admin/students/import");
 
@@ -154,17 +154,17 @@ test("the admin home links to student import and the page renders", async ({
 
   await expect(page).toHaveURL(/\/app\/admin\/students\/import$/);
   await expect(
-    page.getByRole("heading", { level: 1, name: "Student Import" })
+    page.getByRole("heading", { level: 1, name: "Student import" })
   ).toBeVisible();
   await expect(
-    page.getByText("Upload a student workbook to create student accounts in bulk.")
+    page.getByText("Create student accounts in bulk from a workbook.")
   ).toBeVisible();
   await expect(page.getByText("Back to Admin Home")).toBeVisible();
   await expect(page.getByRole("button", { name: "Download template" })).toBeVisible();
   await expect(page.getByLabel("Department")).toBeVisible();
   await expect(page.getByLabel("Level")).toBeVisible();
   await expect(page.getByRole("button", { name: "Choose .xlsx file" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Preview Import" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Preview import" })).toBeVisible();
 });
 
 test("the template download yields a valid student-import workbook", async ({
@@ -192,13 +192,13 @@ test("the department, level, and file are required before previewing", async ({
 }) => {
   await openImportPage(page);
 
-  await page.getByRole("button", { name: "Preview Import" }).click();
+  await page.getByRole("button", { name: "Preview import" }).click();
   await expect(
     page.getByText("Select a department to import into.")
   ).toBeVisible();
 
   await chooseImportTarget(page);
-  await page.getByRole("button", { name: "Preview Import" }).click();
+  await page.getByRole("button", { name: "Preview import" }).click();
   await expect(page.getByText("Select a level for the imported students.")).toHaveCount(0);
   await expect(page.getByText("Choose a .xlsx workbook to import.")).toBeVisible();
 });
@@ -366,7 +366,7 @@ test("invalid rows are flagged with their reasons and confirmation is unavailabl
   await expect(
     page.getByText("Fix the 3 rows marked in the workbook")
   ).toBeVisible();
-  await expect(page.getByRole("button", { name: "Confirm Import" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Confirm import" })).toHaveCount(0);
 });
 
 test("a matric number that already exists is reported on its row", async ({
@@ -385,7 +385,7 @@ test("a matric number that already exists is reported on its row", async ({
   await expect(row.locator(".import-row-invalid")).toBeVisible();
   await expect(row.getByText("matric number already exists")).toBeVisible();
   await expect(importSummaryStat(page, "Need attention")).toContainText("1");
-  await expect(page.getByRole("button", { name: "Confirm Import" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Confirm import" })).toHaveCount(0);
 });
 
 test("confirming a valid preview imports every row and cannot double-submit", async ({
@@ -399,7 +399,7 @@ test("confirming a valid preview imports every row and cannot double-submit", as
   await page.goto("/app/admin/students/import");
   await chooseImportTarget(page);
   await setWorkbook(page, buffer);
-  await page.getByRole("button", { name: "Preview Import" }).click();
+  await page.getByRole("button", { name: "Preview import" }).click();
   await expect(importSummaryStat(page, "Ready to import")).toContainText("3");
   await expect(
     page.getByText(/Importing 3 students into E2E Test Department at Level 100/)
@@ -420,11 +420,11 @@ test("confirming a valid preview imports every row and cannot double-submit", as
   ).toBeVisible({ timeout: 15_000 });
 
   await expect(
-    page.getByRole("button", { name: "Confirm Import" })
+    page.getByRole("button", { name: "Confirm import" })
   ).toHaveCount(0);
   await expect(page.getByText("Import another file")).toBeVisible();
   await expect(
-    page.getByRole("link", { name: "Return to Student Management" })
+    page.getByRole("link", { name: "Return to student management" })
   ).toBeVisible();
 });
 
@@ -451,7 +451,7 @@ test("a consumed or expired preview token surfaces as a friendly error", async (
     })
   );
 
-  await page.getByRole("button", { name: "Confirm Import" }).click();
+  await page.getByRole("button", { name: "Confirm import" }).click();
 
   await expect(
     page.getByText("The preview is invalid, expired, or already used.")
@@ -496,17 +496,17 @@ test("import another file resets the flow and the return link navigates to manag
     ["Second Fresh", "E2E/IMP/0502"],
   ]);
   await setWorkbook(page, buffer);
-  await page.getByRole("button", { name: "Preview Import" }).click();
+  await page.getByRole("button", { name: "Preview import" }).click();
   await expect(importSummaryStat(page, "Total rows")).toContainText("2");
 
-  await page.getByRole("button", { name: "Confirm Import" }).click();
+  await page.getByRole("button", { name: "Confirm import" }).click();
   await expect(
     page.getByText("2 students imported successfully.")
   ).toBeVisible({ timeout: 15_000 });
 
   await page.getByRole("button", { name: "Import another file" }).click();
 
-  await expect(page.getByText("Import Complete")).toHaveCount(0);
+  await expect(page.getByText("Import complete")).toHaveCount(0);
   await expect(importSummaryStat(page, "Total rows")).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Choose .xlsx file" })).toBeVisible();
   await expect(page.getByLabel("Department")).toHaveValue(departmentValue);
@@ -516,17 +516,17 @@ test("import another file resets the flow and the return link navigates to manag
     ["Third Fresh", "E2E/IMP/0503"],
   ]);
   await setWorkbook(page, freshBuffer, "second.xlsx");
-  await page.getByRole("button", { name: "Preview Import" }).click();
+  await page.getByRole("button", { name: "Preview import" }).click();
   await expect(importSummaryStat(page, "Total rows")).toContainText("1");
 
-  await page.getByRole("button", { name: "Confirm Import" }).click();
+  await page.getByRole("button", { name: "Confirm import" }).click();
   await expect(
     page.getByText("1 student imported successfully.")
   ).toBeVisible({ timeout: 15_000 });
 
-  await page.getByRole("link", { name: "Return to Student Management" }).click();
+  await page.getByRole("link", { name: "Return to student management" }).click();
   await expect(page).toHaveURL(/\/app\/admin\/students$/);
   await expect(
-    page.getByRole("heading", { level: 1, name: "Student Management" })
+    page.getByRole("heading", { level: 1, name: "Student management" })
   ).toBeVisible();
 });

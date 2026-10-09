@@ -6,6 +6,7 @@ import { attendanceErrorMessage } from "../app/attendanceErrors";
 import { homePathForRole } from "../app/navigation";
 import { useAuth } from "../app/useAuth";
 import { FormError } from "../components/FormError";
+import { formatPercentage, formatTimeOnly } from "../lib/format";
 import type {
   StudentCourseHistory,
   StudentHistoryAttendanceStatus,
@@ -34,17 +35,6 @@ function formatDateTime(value: string): string {
     dateStyle: "medium",
     timeStyle: "short",
   });
-}
-
-function formatTimeOnly(value: string): string {
-  return new Date(value).toLocaleTimeString(undefined, {
-    hour: "2-digit",
-    minute: "2-digit",
-  });
-}
-
-function formatPercentage(value: number | null): string {
-  return value === null ? "—" : `${value.toFixed(2)}%`;
 }
 
 function statusLabel(status: StudentHistoryAttendanceStatus): string {
@@ -191,11 +181,11 @@ export function StudentAttendanceHistoryPage() {
       <header className="app-header attendance-history-page-header">
         <div className="attendance-history-page-header__copy">
           <p className="attendance-history-page-header__eyebrow">
-            Student records
+            Student attendance history
           </p>
-          <h1>Attendance History</h1>
+          <h1>Attendance history</h1>
           <p className="app-header__sub">
-            Completed sessions and attendance for your enrolled courses.
+            Completed sessions and your attendance for each enrolled course.
           </p>
         </div>
         <nav className="app-header__nav" aria-label="Student navigation">
@@ -207,7 +197,7 @@ export function StudentAttendanceHistoryPage() {
             disabled={isLoggingOut}
             aria-busy={isLoggingOut}
           >
-            {isLoggingOut ? "Logging out…" : "Log out"}
+            {isLoggingOut ? "Signing out…" : "Sign out"}
           </button>
         </nav>
       </header>
@@ -276,7 +266,9 @@ export function StudentAttendanceHistoryPage() {
                     <span className="history-course-card__code">
                       {course.courseCode}
                     </span>
-                    <span className="history-course-card__divider"> — </span>
+                    <span className="history-course-card__divider" aria-hidden="true">
+                      {" · "}
+                    </span>
                     <span className="history-course-card__title">
                       {course.courseTitle}
                     </span>
@@ -311,7 +303,7 @@ export function StudentAttendanceHistoryPage() {
                     >
                       <div className="history-session__header">
                         <p className="session-list__title history-session-record__time">
-                          {formatDateTime(session.startTime)} –{" "}
+                          {formatDateTime(session.startTime)} to{" "}
                           {formatTimeOnly(session.endTime)}
                         </p>
                         <span

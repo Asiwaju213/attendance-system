@@ -7,6 +7,7 @@ import {
 } from "../api/adminCourseEnrollment";
 import { listAdminStudents } from "../api/adminStudents";
 import { FormError } from "../components/FormError";
+import { countLabel, statusLabel } from "../lib/format";
 import type {
   AdminCourseOfferingRegistrations,
   AdminCourseOfferingRegistrationsFilters,
@@ -15,6 +16,12 @@ import type {
 import type { AdminStudentListData } from "../types/studentAdmin";
 
 const PAGE_SIZE = 10;
+
+const REGISTRATION_STATUS_LABELS: Record<RegistrationStatus, string> = {
+  ENROLLED: "Enrolled",
+  DROPPED: "Dropped",
+  COMPLETED: "Completed",
+};
 
 function parseOfferingId(value: string | undefined): number | null {
   if (value === undefined || value.trim() === "") {
@@ -156,22 +163,21 @@ export function AdminCourseOfferingRosterPage() {
     }
   }
 
-  const statusLabels: Record<RegistrationStatus, string> = {
-    ENROLLED: "Enrolled",
-    DROPPED: "Dropped",
-    COMPLETED: "Completed",
-  };
-
   const loading = offeringId !== null && registrations === null && listError === null;
+  const currentPage = Math.floor(offset / PAGE_SIZE) + 1;
+  const totalPages = Math.max(
+    1,
+    Math.ceil((registrations?.total ?? 0) / PAGE_SIZE)
+  );
 
   return (
     <main className="app-page admin-page">
       <header className="app-header admin-page-header">
         <div>
           <p className="admin-page-header__eyebrow">Administration</p>
-          <h1>Course Offering Roster</h1>
+          <h1>Course offering roster</h1>
           <p className="app-header__sub">
-            View the roster for a course offering and enroll students.
+            Students enrolled in this offering, and a way to add another.
           </p>
         </div>
         <nav className="app-header__nav" aria-label="Admin navigation">
@@ -201,10 +207,10 @@ export function AdminCourseOfferingRosterPage() {
       {registrations !== null ? (
         <>
           <section className="app-card app-card--wide" aria-labelledby="roster-offering-title">
-            <h2 id="roster-offering-title">Offering</h2>
+            <h2 id="roster-offering-title">Course offering</h2>
             <div className="admin-detail">
               <p>
-                <strong>Course:</strong> {registrations.courseOffering.courseCode} — {registrations.courseOffering.courseTitle}
+                <strong>Course:</strong> {registrations.courseOffering.courseCode} · {registrations.courseOffering.courseTitle}
               </p>
               <p>
                 <strong>Academic session:</strong> {registrations.courseOffering.academicSession}
@@ -216,7 +222,8 @@ export function AdminCourseOfferingRosterPage() {
                 <strong>Level:</strong> Level {registrations.courseOffering.level.name}
               </p>
               <p>
-                <strong>Status:</strong> {registrations.courseOffering.status}
+                <strong>Status:</strong>{" "}
+                {statusLabel(registrations.courseOffering.status)}
               </p>
             </div>
           </section>
@@ -225,12 +232,40 @@ export function AdminCourseOfferingRosterPage() {
             <h2 id="roster-filters-title">Filters</h2>
             <div className="admin-filter-grid">
               <div className="field">
-                <label htmlFor={matricFilterId} className="field__label">Matric number</label>
-                <input id={matricFilterId} className="field__input" type="text" placeholder="Filter by matric" value={filters.matricNumber ?? ""} onChange={(event) => setFilters((f) => ({ ...f, matricNumber: event.target.value || undefined }))} />
+                <label htmlFor={matricFilterId} className="field__label">
+                  Matric Number
+                </label>
+                <input
+                  id={matricFilterId}
+                  className="field__input"
+                  type="text"
+                  placeholder="Filter by matric number"
+                  value={filters.matricNumber ?? ""}
+                  onChange={(event) =>
+                    setFilters((f) => ({
+                      ...f,
+                      matricNumber: event.target.value || undefined,
+                    }))
+                  }
+                />
               </div>
               <div className="field">
-                <label htmlFor={nameFilterId} className="field__label">Student name</label>
-                <input id={nameFilterId} className="field__input" type="text" placeholder="Filter by name" value={filters.studentName ?? ""} onChange={(event) => setFilters((f) => ({ ...f, studentName: event.target.value || undefined }))} />
+                <label htmlFor={nameFilterId} className="field__label">
+                  Student Name
+                </label>
+                <input
+                  id={nameFilterId}
+                  className="field__input"
+                  type="text"
+                  placeholder="Filter by student name"
+                  value={filters.studentName ?? ""}
+                  onChange={(event) =>
+                    setFilters((f) => ({
+                      ...f,
+                      studentName: event.target.value || undefined,
+                    }))
+                  }
+                />
               </div>
               <div className="field">
                 <label htmlFor={statusFilterId} className="field__label">Status</label>
@@ -255,12 +290,14 @@ export function AdminCourseOfferingRosterPage() {
 
           {registrations.items.length === 0 ? (
             <div className="admin-empty">
-              <p className="form-error admin-empty__message" role="status">No registrations match the current filters.</p>
+              <p className="admin-empty__message" role="status">No registrations match the current filters.</p>
               <p className="inline-status">Try adjusting the filters, or enroll a student.</p>
             </div>
           ) : (
             <>
-              <p className="inline-status" role="status">{registrations.total} registration(s)</p>
+              <p className="inline-status" role="status">
+                {countLabel(registrations.total, "registration", "registrations")}
+              </p>
               <div className="admin-table-scroll">
                 <table className="admin-table">
                   <thead>
@@ -279,15 +316,42 @@ export function AdminCourseOfferingRosterPage() {
                         <td><span className="admin-table__secondary">{item.matricNumber}</span></td>
                         <td>{item.department.name}</td>
                         <td>Level {item.level.name}</td>
-                        <td>{statusLabels[item.status]}</td>
+                        <td>
+                          <span
+                            className={`student-status ${
+                              item.status === "ENROLLED"
+                                ? "student-status--active"
+                                : "student-status--inactive"
+                            }`}
+                          >
+                            {REGISTRATION_STATUS_LABELS[item.status]}
+                          </span>
+                        </td>
                       </tr>
                     ))}
                   </tbody>
                 </table>
               </div>
               <div className="confirm-row">
-                <button type="button" className="secondary-button" onClick={() => setOffset((o) => Math.max(0, o - PAGE_SIZE))} disabled={offset === 0}>Previous</button>
-                <button type="button" className="secondary-button" onClick={() => setOffset((o) => o + PAGE_SIZE)} disabled={registrations.items.length < PAGE_SIZE}>Next</button>
+                <button
+                  type="button"
+                  className="secondary-button"
+                  onClick={() => setOffset((o) => Math.max(0, o - PAGE_SIZE))}
+                  disabled={offset === 0}
+                >
+                  Previous page
+                </button>
+                <p className="inline-status" role="status">
+                  Page {currentPage} of {totalPages}
+                </p>
+                <button
+                  type="button"
+                  className="secondary-button"
+                  onClick={() => setOffset((o) => o + PAGE_SIZE)}
+                  disabled={registrations.items.length < PAGE_SIZE}
+                >
+                  Next page
+                </button>
               </div>
             </>
           )}
@@ -309,10 +373,10 @@ export function AdminCourseOfferingRosterPage() {
                     <thead>
                       <tr>
                         <th scope="col">Name</th>
-                        <th scope="col">Matric</th>
+                        <th scope="col">Matric Number</th>
                         <th scope="col">Department</th>
                         <th scope="col">Level</th>
-                        <th scope="col">Action</th>
+                        <th scope="col">Actions</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -322,7 +386,16 @@ export function AdminCourseOfferingRosterPage() {
                           <td>{student.matricNumber}</td>
                           <td>{student.department.name}</td>
                           <td>Level {student.level.name}</td>
-                          <td><button type="button" className="secondary-button" onClick={() => selectEnrollStudent(student)}>Select</button></td>
+                          <td>
+                            <button
+                              type="button"
+                              className="secondary-button"
+                              onClick={() => selectEnrollStudent(student)}
+                              aria-label={`Enroll ${student.name}, ${student.matricNumber}`}
+                            >
+                              Enroll
+                            </button>
+                          </td>
                         </tr>
                       ))}
                     </tbody>

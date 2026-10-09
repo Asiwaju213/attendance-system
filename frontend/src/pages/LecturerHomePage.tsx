@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { LoadingPage } from "../components/LoadingPage";
 import { useAuth } from "../app/useAuth";
+import { statusLabel } from "../lib/format";
 
 function greetingForLocalTime(): string {
   const hour = new Date().getHours();
@@ -37,6 +38,7 @@ export function LecturerHomePage() {
       <header className="lecturer-home-header">
         <div className="lecturer-home-header__copy">
           <p className="lecturer-home-header__eyebrow">Lecturer portal</p>
+          <h1>Lecturer Home</h1>
           <p className="lecturer-home-greeting">
             {greetingForLocalTime()}, {user.name}
           </p>
@@ -50,7 +52,7 @@ export function LecturerHomePage() {
             disabled={isLoggingOut}
             aria-busy={isLoggingOut}
           >
-            {isLoggingOut ? "Logging out…" : "Log out"}
+            {isLoggingOut ? "Signing out…" : "Sign out"}
           </button>
         </div>
       </header>
@@ -59,7 +61,10 @@ export function LecturerHomePage() {
         <h2 id="lecturer-identity-heading" className="visually-hidden">
           Lecturer details
         </h2>
-    
+        <p className="lecturer-detail">
+          <span className="lecturer-detail__label">Role: </span>
+          {statusLabel(user.role)}
+        </p>
         <p className="lecturer-detail">
           <span className="lecturer-detail__label">Staff ID: </span>
           {user.staffId ?? "Not available"}
@@ -67,9 +72,9 @@ export function LecturerHomePage() {
       </section>
 
       <section className="lecturer-actions" aria-labelledby="lecturer-actions-heading">
-        <div className="lecturer-section-heading">
-          <p id="lecturer-actions-heading">Teaching workspace</p>
-        </div>
+        <h2 id="lecturer-actions-heading" className="visually-hidden">
+          Teaching tasks
+        </h2>
 
         <div className="lecturer-action-grid">
           <Link
@@ -123,20 +128,11 @@ export function LecturerHomePage() {
             <span className="lecturer-action-copy">
               <span className="lecturer-action-label">View attendance reports</span>
               <span className="lecturer-action-description">
-                Review attendance records for your teaching context.
+                Attendance totals and session records for your courses.
               </span>
             </span>
           </Link>
         </div>
-      </section>
-
-      <section className="lecturer-guidance" aria-labelledby="lecturer-guidance-heading">
-        <p className="lecturer-guidance__eyebrow">Operational note</p>
-        <h2 id="lecturer-guidance-heading">Use the workspace that matches your task</h2>
-        <p>
-          Manage live attendance sessions first, then use reports when you need to
-          review completed attendance for your assigned courses.
-        </p>
       </section>
     </main>
   );

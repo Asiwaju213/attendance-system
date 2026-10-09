@@ -64,7 +64,7 @@ test("admin login page exists at /staff/admin/login", async ({ page }) => {
   await page.goto("/staff/admin/login");
 
   await expect(
-    page.getByRole("heading", { level: 1, name: "Admin Login" })
+    page.getByRole("heading", { level: 1, name: "Administrator Login" })
   ).toBeVisible();
   await expect(page.getByLabel("Username")).toBeVisible();
   await expect(page.getByLabel("Password")).toBeVisible();

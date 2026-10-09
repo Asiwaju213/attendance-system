@@ -74,7 +74,7 @@ test.describe("Student Course Registration", () => {
     await page.goto("/app/student/registration");
     await expect(page).toHaveURL(/\/login$/);
     await expect(
-      page.getByRole("heading", { level: 1, name: "Course Registration" })
+      page.getByRole("heading", { level: 1, name: "Course registration" })
     ).toHaveCount(0);
   });
 
@@ -85,7 +85,7 @@ test.describe("Student Course Registration", () => {
     await page.getByRole("link", { name: "Course registration" }).click();
     await expect(page).toHaveURL(/\/app\/student\/registration$/);
     await expect(
-      page.getByRole("heading", { level: 1, name: "Course Registration" })
+      page.getByRole("heading", { level: 1, name: "Course registration" })
     ).toBeVisible();
 
     await page.getByRole("link", { name: "Home" }).click();
@@ -99,7 +99,7 @@ test.describe("Student Course Registration", () => {
     await page.goto("/app/student/registration");
 
     await expect(
-      page.getByRole("heading", { level: 1, name: "Course Registration" })
+      page.getByRole("heading", { level: 1, name: "Course registration" })
     ).toBeVisible();
     await expect(page.getByText("E2E-2026/2027")).toBeVisible();
 
@@ -314,14 +314,14 @@ test.describe("Student Course Registration", () => {
     await page.goto("/app/student/registration");
 
     await expect(
-      page.getByRole("heading", { level: 2, name: "Available Courses" })
+      page.getByRole("heading", { level: 2, name: "Available courses" })
     ).toBeVisible();
     await expect(
-      page.getByRole("heading", { level: 2, name: "My Courses" })
+      page.getByRole("heading", { level: 2, name: "My courses" })
     ).toBeVisible();
 
     // Enrolled seed courses appear exactly once each (in My Courses), show the
-    // Enrolled badge, and offer no enrollment action — they are not duplicated
+    // Enrolled badge, and offer no enrollment action · they are not duplicated
     // in the available list.
     for (const courseCode of ["E2E-101", "E2E-102", "E2E-103"]) {
       const section = courseSection(page, courseCode);
@@ -342,7 +342,7 @@ test.describe("Student Course Registration", () => {
       enrolledCards.getByRole("button", { name: "Enroll" })
     ).toHaveCount(0);
 
-    // The active session is shown exactly once — in the page header — and is
+    // The active session is shown exactly once · in the page header · and is
     // not duplicated inside the enrolled course cards.
     await expect(page.getByText("E2E-2026/2027")).toHaveCount(1);
   });
@@ -354,10 +354,10 @@ test.describe("Student Course Registration", () => {
     await page.goto("/app/student/courses");
 
     await expect(
-      page.getByRole("heading", { level: 1, name: "Course Registration" })
+      page.getByRole("heading", { level: 1, name: "Course registration" })
     ).toBeVisible();
     await expect(
-      page.getByRole("heading", { level: 2, name: "My Courses" })
+      page.getByRole("heading", { level: 2, name: "My courses" })
     ).toBeVisible();
     await expect(courseSection(page, "E2E-101")).toBeVisible();
   });

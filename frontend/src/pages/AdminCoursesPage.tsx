@@ -10,6 +10,7 @@ import { listAdminDepartments, listAdminFaculties } from "../api/adminOrganizati
 import { ApiError } from "../api/client";
 import { FormError } from "../components/FormError";
 import { ADMIN_LEVEL_OPTIONS } from "../lib/adminLevels";
+import { statusLabel } from "../lib/format";
 import type {
   AdminCourse,
   AdminCourseCreateInput,
@@ -298,9 +299,9 @@ export function AdminCoursesPage() {
       <header className="app-header admin-page-header">
         <div>
           <p className="admin-page-header__eyebrow">Administration</p>
-          <h1>Course Management</h1>
+          <h1>Course management</h1>
           <p className="app-header__sub">
-            Create and maintain the courses students can take.
+            Courses students can register for, and which department owns each one.
           </p>
         </div>
         <nav className="app-header__nav" aria-label="Admin navigation">
@@ -325,7 +326,7 @@ export function AdminCoursesPage() {
 
       {courses !== null && courses.length === 0 ? (
         <div className="admin-empty">
-          <p className="form-error admin-empty__message" role="status">
+          <p className="admin-empty__message" role="status">
             No courses found.
           </p>
           <p className="inline-status">
@@ -387,7 +388,7 @@ export function AdminCoursesPage() {
                       <span
                         className={`student-status ${courseStatusClass(course.status)}`}
                       >
-                        {course.status}
+                        {statusLabel(course.status)}
                       </span>
                     </td>
                     <td>
@@ -434,7 +435,7 @@ export function AdminCoursesPage() {
       ) : null}
 
       <section className="app-card app-card--wide admin-compact-form-card" aria-labelledby="create-course-heading">
-        <h2 id="create-course-heading">Add Course</h2>
+        <h2 id="create-course-heading">Add course</h2>
         <p className="note">
           A course belongs to exactly one owner: a faculty (faculty-wide course)
           or a department (department-specific course).
@@ -584,9 +585,9 @@ export function AdminCoursesPage() {
 
       {editing !== null ? (
         <section className="app-card app-card--wide" aria-labelledby="edit-course-heading">
-          <h2 id="edit-course-heading">Edit Course</h2>
+          <h2 id="edit-course-heading">Edit course</h2>
           <p className="note">
-            Editing {editing.courseCode} — {editing.title}. Changing the owner
+            Editing {editing.courseCode} ({editing.title}). Changing the owner
             type switches between a faculty-wide and a department-specific
             course.
           </p>

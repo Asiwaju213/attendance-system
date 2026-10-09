@@ -44,7 +44,7 @@ async function loginAsAdmin(page: Page): Promise<void> {
 
 async function openRosterPage(page: Page, offeringId: number): Promise<void> {
   await page.goto(`${ROSTER_PAGE}/${offeringId}/roster`);
-  await expect(page.getByRole("heading", { level: 1, name: "Course Offering Roster" })).toBeVisible();
+  await expect(page.getByRole("heading", { level: 1, name: "Course offering roster" })).toBeVisible();
 }
 
 async function getOpenOfferingId(page: Page, courseCode: string): Promise<number> {
@@ -57,7 +57,7 @@ async function getOpenOfferingId(page: Page, courseCode: string): Promise<number
 }
 
 async function openEnrollPanel(page: Page): Promise<void> {
-  await page.getByRole("button", { name: "Enroll Student" }).click();
+  await page.getByRole("button", { name: "Enroll student" }).click();
   await expect(page.getByLabel("Search students")).toBeVisible();
 }
 
@@ -66,7 +66,7 @@ async function pickStudent(page: Page, matricNumber: string): Promise<void> {
     .locator(".confirm-row--block .admin-table__row")
     .filter({ hasText: matricNumber });
   await expect(searchRow).toBeVisible({ timeout: 10_000 });
-  await searchRow.getByRole("button", { name: "Select" }).click();
+  await searchRow.getByRole("button", { name: /^Enroll / }).click();
 }
 
 test("Admin can open the course-offering roster", async ({ page }) => {
@@ -79,7 +79,7 @@ test("Offering context renders in the roster", async ({ page }) => {
   await loginAsAdmin(page);
   const offeringId = await getOpenOfferingId(page, "E2E-102");
   await openRosterPage(page, offeringId);
-  await expect(page.getByText(/Course:\s*E2E-102 — E2E Computer Science 102/)).toBeVisible({ timeout: 10_000 });
+  await expect(page.getByText(/Course:\s*E2E-102 · E2E Computer Science 102/)).toBeVisible({ timeout: 10_000 });
   await expect(page.getByText(/Academic session:\s*E2E-2026\/2027/)).toBeVisible();
   await expect(page.getByText(/Semester:\s*First Semester/)).toBeVisible();
   await expect(page.getByText(/Level:\s*Level 100/)).toBeVisible();
@@ -98,7 +98,7 @@ test("Matric search works", async ({ page }) => {
   await loginAsAdmin(page);
   const offeringId = await getOpenOfferingId(page, "E2E-101");
   await openRosterPage(page, offeringId);
-  await page.getByLabel("Matric number").fill("E2E/STU/0001");
+  await page.getByLabel("Matric Number").fill("E2E/STU/0001");
   const row = page.locator(".admin-table__row").filter({ hasText: "E2E/STU/0001" });
   await expect(row).toBeVisible();
 });
@@ -107,7 +107,7 @@ test("Student-name search works", async ({ page }) => {
   await loginAsAdmin(page);
   const offeringId = await getOpenOfferingId(page, "E2E-101");
   await openRosterPage(page, offeringId);
-  await page.getByLabel("Student name").fill("E2E Student");
+  await page.getByLabel("Student Name").fill("E2E Student");
   const row = page.locator(".admin-table__row").filter({ hasText: "E2E Student" });
   await expect(row).toBeVisible();
 });
@@ -125,8 +125,8 @@ test("Pagination controls work", async ({ page }) => {
   await loginAsAdmin(page);
   const offeringId = await getOpenOfferingId(page, "E2E-101");
   await openRosterPage(page, offeringId);
-  await expect(page.getByRole("button", { name: "Previous" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Next" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Previous page" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Next page" })).toBeVisible();
 });
 
 test("Empty state works for an offering with no registrations", async ({ page }) => {
@@ -151,8 +151,8 @@ test("Eligible student can be enrolled", async ({ page }) => {
   await openEnrollPanel(page);
   await page.getByLabel("Search students").fill(E2E_STUDENT_TWO.name);
   await pickStudent(page, E2E_STUDENT_TWO.matricNumber);
-  await expect(page.getByText("Confirm Enrollment")).toBeVisible();
-  await page.getByRole("button", { name: "Confirm Enrollment" }).click();
+  await expect(page.getByText("Confirm enrollment")).toBeVisible();
+  await page.getByRole("button", { name: "Confirm enrollment" }).click();
   await expect(page.getByText("Student enrolled successfully.")).toBeVisible();
 });
 
@@ -163,7 +163,7 @@ test("Enrollment appears in roster after refresh", async ({ page }) => {
   await openEnrollPanel(page);
   await page.getByLabel("Search students").fill(E2E_STUDENT_THREE.name);
   await pickStudent(page, E2E_STUDENT_THREE.matricNumber);
-  await page.getByRole("button", { name: "Confirm Enrollment" }).click();
+  await page.getByRole("button", { name: "Confirm enrollment" }).click();
   await expect(page.getByText("Student enrolled successfully.")).toBeVisible();
   // Refresh roster
   await page.reload();
@@ -178,7 +178,7 @@ test("Duplicate enrollment displays a useful error", async ({ page }) => {
   await openEnrollPanel(page);
   await page.getByLabel("Search students").fill("E2E/STU/0001");
   await pickStudent(page, "E2E/STU/0001");
-  await page.getByRole("button", { name: "Confirm Enrollment" }).click();
+  await page.getByRole("button", { name: "Confirm enrollment" }).click();
   await expect(page.getByText("This student is already enrolled in this offering.")).toBeVisible();
 });
 
@@ -190,7 +190,7 @@ test("Invalid/ineligible student displays backend validation error", async ({ pa
   // E2E/STU/0005 is level 300, E2E-102 is level 100 -> wrong level
   await page.getByLabel("Search students").fill(E2E_STUDENT_NO_COURSES.name);
   await pickStudent(page, E2E_STUDENT_NO_COURSES.matricNumber);
-  await page.getByRole("button", { name: "Confirm Enrollment" }).click();
+  await page.getByRole("button", { name: "Confirm enrollment" }).click();
   await expect(page.getByText("This student's level does not match the course level.")).toBeVisible();
 });
 

@@ -295,7 +295,7 @@ export function StudentCourseRegistrationPage() {
         </div>
         <div>
           <dt>Lecturer{lecturerNames.includes(",") ? "s" : ""}</dt>
-          <dd>{lecturerNames === "" ? "—" : lecturerNames}</dd>
+          <dd>{lecturerNames === "" ? "Not assigned" : lecturerNames}</dd>
         </div>
       </dl>
     );
@@ -306,11 +306,11 @@ export function StudentCourseRegistrationPage() {
       <header className="app-header registration-page-header">
         <div className="registration-page-header__copy">
           <p className="registration-page-header__eyebrow">Student registration</p>
-          <h1>Course Registration</h1>
+          <h1>Course registration</h1>
           <p className="app-header__sub">
             {academicSession !== null
-              ? `Register for courses offered in ${academicSession.name}.`
-              : "Register for the courses available to you this session."}
+              ? `Courses offered in ${academicSession.name}.`
+              : "Courses currently open for registration."}
           </p>
         </div>
         <nav className="app-header__nav" aria-label="Student navigation">
@@ -322,7 +322,7 @@ export function StudentCourseRegistrationPage() {
             disabled={isLoggingOut}
             aria-busy={isLoggingOut}
           >
-            {isLoggingOut ? "Logging out…" : "Log out"}
+            {isLoggingOut ? "Signing out…" : "Sign out"}
           </button>
         </nav>
       </header>
@@ -370,10 +370,10 @@ export function StudentCourseRegistrationPage() {
         >
           <div className="registration-section__header">
             <h2 id="available-courses-heading" className="registration-section__title">
-              Available Courses
+              Available courses
             </h2>
             <p className="registration-section__description">
-              Courses available for your registration.
+              Courses you can register for now.
             </p>
           </div>
           {availableCourses.length === 0 ? (
@@ -384,9 +384,6 @@ export function StudentCourseRegistrationPage() {
               <p className="registration-state-card__title">No courses available</p>
               <p className="inline-status" role="status">
                 No courses are currently available for registration.
-              </p>
-              <p className="registration-state-card__hint">
-                There are no eligible courses available for registration right now.
               </p>
             </section>
           ) : (
@@ -409,7 +406,7 @@ export function StudentCourseRegistrationPage() {
                     <span className="registration-course-card__code">
                       {course.courseCode}
                     </span>
-                    <span className="registration-course-card__divider"> — </span>
+                    <span className="registration-course-card__divider" aria-hidden="true">{" · "}</span>
                     <span className="registration-course-card__name">
                       {course.title}
                     </span>
@@ -453,29 +450,29 @@ export function StudentCourseRegistrationPage() {
       >
         <div className="registration-section__header">
           <h2 id="my-courses-heading" className="registration-section__title">
-            My Courses
+            My courses
           </h2>
           <p className="registration-section__description">
-            Courses you are currently enrolled in.
+            Courses you are enrolled in.
           </p>
         </div>
         {myCourses.length === 0 ? (
           registrations !== null && registrationsError === null ? (
             <section
               className="app-card app-card--wide registration-state-card registration-state-card--empty"
-              aria-label="My Courses"
+              aria-label="My courses"
             >
               <p className="registration-state-card__title">No courses yet</p>
-              <p className="inline-status">
+              <p className="inline-status" role="status">
                 You are not enrolled in any courses yet.
               </p>
             </section>
           ) : registrationsError === null ? (
             <section
               className="app-card app-card--wide registration-state-card registration-state-card--loading"
-              aria-label="My Courses"
+              aria-label="My courses"
             >
-              <p className="inline-status">Loading your courses…</p>
+              <p className="inline-status" role="status">Loading your courses…</p>
             </section>
           ) : null
         ) : (
@@ -493,7 +490,7 @@ export function StudentCourseRegistrationPage() {
                   <span className="registration-course-card__code">
                     {row.courseCode}
                   </span>
-                  <span className="registration-course-card__divider"> — </span>
+                  <span className="registration-course-card__divider" aria-hidden="true">{" · "}</span>
                   <span className="registration-course-card__name">
                     {row.title}
                   </span>

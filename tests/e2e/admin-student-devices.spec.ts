@@ -38,7 +38,7 @@ async function openDeviceAdminPage(page: Page): Promise<void> {
   await loginAsAdmin(page);
   await page.goto("/app/admin/student-devices");
   await expect(
-    page.getByRole("heading", { level: 1, name: "Student Device Administration" })
+    page.getByRole("heading", { level: 1, name: "Student device administration" })
   ).toBeVisible();
 }
 
@@ -77,13 +77,13 @@ async function addVirtualAuthenticator(page: Page): Promise<void> {
 async function enrollDeviceViaUi(page: Page, label: string): Promise<void> {
   await page.goto("/app/student/device");
   await expect(
-    page.getByRole("heading", { level: 1, name: "Device Enrollment" })
+    page.getByRole("heading", { level: 1, name: "Device enrollment" })
   ).toBeVisible();
   await expect(page.locator(".device-status--none")).toContainText(
     "No Active Device"
   );
 
-  await page.getByLabel("Device Label (optional)").fill(label);
+  await page.getByLabel("Device label (optional)").fill(label);
   await page.getByRole("button", { name: "Register This Device" }).click();
 
   await expect(page.locator(".device-enrolled")).toContainText("Device Active", {
@@ -99,7 +99,7 @@ test("an unauthenticated user is redirected to the admin login page", async ({
 
   await expect(page).toHaveURL(/\/staff\/admin\/login$/);
   await expect(
-    page.getByRole("heading", { level: 1, name: "Admin Login" })
+    page.getByRole("heading", { level: 1, name: "Administrator Login" })
   ).toBeVisible();
 });
 
@@ -140,7 +140,7 @@ test("an admin sees a filtered student with no device", async ({ page }) => {
   await expect(deviceRow(page)).toContainText(E2E_STUDENT_TWO.name);
   await expect(deviceRow(page).locator(".device-status--none")).toBeVisible();
   await expect(
-    deviceRow(page).getByRole("button", { name: "Reset Device" })
+    deviceRow(page).getByRole("button", { name: "Reset device" })
   ).toHaveCount(0);
 });
 
@@ -168,7 +168,7 @@ test("the admin then sees the enrolled device as active", async ({ page }) => {
 
   await expect(deviceRow(page).locator(".device-status--active")).toBeVisible();
   await expect(
-    deviceRow(page).getByRole("button", { name: "Reset Device" })
+    deviceRow(page).getByRole("button", { name: "Reset device" })
   ).toBeVisible();
 
   firstCredentialLabel =
@@ -181,13 +181,13 @@ test("an admin can reset the active device", async ({ page }) => {
   await filterToDeviceStudent(page);
   await expect(deviceRow(page).locator(".device-status--active")).toBeVisible();
 
-  await deviceRow(page).getByRole("button", { name: "Reset Device" }).click();
+  await deviceRow(page).getByRole("button", { name: "Reset device" }).click();
   await expect(deviceRow(page).locator(".confirm-message")).toContainText(
     "revoke the student's active device"
   );
 
   await deviceRow(page)
-    .getByRole("button", { name: "Confirm Reset" })
+    .getByRole("button", { name: "Confirm reset" })
     .click();
 
   await expect(page.locator(".resource-success")).toContainText(
@@ -195,7 +195,7 @@ test("an admin can reset the active device", async ({ page }) => {
   );
   await expect(deviceRow(page).locator(".device-status--revoked")).toBeVisible();
   await expect(
-    deviceRow(page).getByRole("button", { name: "Reset Device" })
+    deviceRow(page).getByRole("button", { name: "Reset device" })
   ).toHaveCount(0);
 });
 

@@ -10,13 +10,7 @@ import type {
   DeviceStatus,
 } from "../types/adminStudentDevice";
 import { FormError } from "../components/FormError";
-
-function formatDateTime(value: string): string {
-  return new Date(value).toLocaleString(undefined, {
-    dateStyle: "medium",
-    timeStyle: "short",
-  });
-}
+import { NOT_AVAILABLE, formatDateTime } from "../lib/format";
 
 function deviceListErrorMessage(error: unknown): string {
   if (error instanceof ApiError && error.status === 401) {
@@ -137,10 +131,9 @@ export function AdminStudentDevicesPage() {
       <header className="app-header admin-page-header">
         <div>
           <p className="admin-page-header__eyebrow">Administration</p>
-          <h1>Student Device Administration</h1>
+          <h1>Student device administration</h1>
           <p className="app-header__sub">
-            Manage WebAuthn device enrollments. Reset a device to revoke it and
-            require the student to enroll a replacement.
+            Reset a student's device to revoke it and require a replacement.
           </p>
         </div>
         <nav className="app-header__nav" aria-label="Admin navigation">
@@ -187,17 +180,17 @@ export function AdminStudentDevicesPage() {
               value={statusFilter}
               onChange={(e) => setStatusFilter(e.target.value as DeviceStatus | "")}
             >
-              <option value="">All</option>
+              <option value="">All device statuses</option>
               <option value="ACTIVE">Active</option>
               <option value="REVOKED">Revoked</option>
-              <option value="NO_DEVICE">No Device</option>
+              <option value="NO_DEVICE">No device</option>
             </select>
           </div>
         </div>
       </section>
 
       <section className="app-card app-card--wide" aria-labelledby="devices-heading">
-        <h2 id="devices-heading">Student Devices</h2>
+        <h2 id="devices-heading">Devices</h2>
 
         {error !== null ? (
           <div className="resource-error">
@@ -216,7 +209,7 @@ export function AdminStudentDevicesPage() {
 
         {devices !== null && devices.length === 0 ? (
           <div className="admin-empty">
-            <p className="form-error admin-empty__message" role="status">
+            <p className="admin-empty__message" role="status">
               No students match the current filters.
             </p>
           </div>
@@ -252,19 +245,19 @@ export function AdminStudentDevicesPage() {
                         </span>
                       ) : (
                         <span className="device-status device-status--none">
-                          No Device
+                          No device
                         </span>
                       )}
                     </td>
                     <td>
                       {student.device
                         ? formatDateTime(student.device.enrolledAt)
-                        : "—"}
+                        : NOT_AVAILABLE}
                     </td>
                     <td>
                       {student.device?.revokedAt
                         ? formatDateTime(student.device.revokedAt)
-                        : "—"}
+                        : NOT_AVAILABLE}
                     </td>
                     <td>
                       {student.device ? (
@@ -272,7 +265,7 @@ export function AdminStudentDevicesPage() {
                           {getSafeCredentialLabel(student.device.credentialId)}
                         </code>
                       ) : (
-                        "—"
+                        NOT_AVAILABLE
                       )}
                     </td>
                     <td>
@@ -281,7 +274,7 @@ export function AdminStudentDevicesPage() {
                           {confirmResetId === student.studentId ? (
                             <div className="confirm-row">
                               <p className="confirm-message">
-                                This will revoke the student's active device. They
+                                This revokes the student's active device. They
                                 will need to enroll a new device before they can mark
                                 attendance. The old device will no longer work.
                               </p>
@@ -295,7 +288,7 @@ export function AdminStudentDevicesPage() {
                                 >
                                   {busyStudentId === student.studentId
                                     ? "Revoking…"
-                                    : "Confirm Reset"}
+                                    : "Confirm reset"}
                                 </button>
                                 <button
                                   type="button"
@@ -310,16 +303,16 @@ export function AdminStudentDevicesPage() {
                           ) : (
                             <button
                               type="button"
-                              className="secondary-button danger-button"
+                              className="danger-button"
                               onClick={() => handleResetClick(student)}
                               disabled={busyStudentId !== null}
                             >
-                              Reset Device
+                              Reset device
                             </button>
                           )}
                         </>
                       ) : (
-                        <span className="admin-table__empty">—</span>
+                        <span className="admin-table__empty">{NOT_AVAILABLE}</span>
                       )}
                     </td>
                   </tr>

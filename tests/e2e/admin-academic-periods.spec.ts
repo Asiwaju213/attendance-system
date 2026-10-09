@@ -28,7 +28,7 @@ async function openAcademicPeriodsPage(page: Page): Promise<void> {
   await loginAsAdmin(page);
   await page.goto("/app/admin/academic-periods");
   await expect(
-    page.getByRole("heading", { level: 1, name: /Academic Sessions/ })
+    page.getByRole("heading", { level: 1, name: /Academic sessions/ })
   ).toBeVisible();
 }
 
@@ -43,7 +43,7 @@ test("an unauthenticated user is redirected to the admin login page", async ({
 
   await expect(page).toHaveURL(/\/staff\/admin\/login$/);
   await expect(
-    page.getByRole("heading", { level: 1, name: "Admin Login" })
+    page.getByRole("heading", { level: 1, name: "Administrator Login" })
   ).toBeVisible();
 });
 
@@ -87,7 +87,7 @@ test("an admin can open the page from Admin Home and see the active session", as
   await loginAsAdmin(page);
 
   await page
-    .getByRole("link", { name: "Academic Sessions & Semesters" })
+    .getByRole("link", { name: "Academic sessions and semesters" })
     .click();
 
   await expect(page).toHaveURL(/\/app\/admin\/academic-periods$/);

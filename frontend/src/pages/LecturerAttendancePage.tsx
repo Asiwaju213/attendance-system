@@ -5,6 +5,7 @@ import { attendanceErrorMessage } from "../app/attendanceErrors";
 import { homePathForRole } from "../app/navigation";
 import { useAuth } from "../app/useAuth";
 import { FormError } from "../components/FormError";
+import { statusLabel } from "../lib/format";
 import {
   createAttendanceSession,
   endAttendanceSession,
@@ -33,28 +34,6 @@ function formatDateTime(value: string): string {
     dateStyle: "medium",
     timeStyle: "short",
   });
-}
-
-function stateLabel(session: AttendanceSession): string {
-  switch (session.currentState) {
-    case "ACTIVE":
-      return "Active";
-    case "EXPIRED":
-      return "Expired";
-    default:
-      return "Ended";
-  }
-}
-
-function historyStateLabel(session: AttendanceSession): string {
-  switch (session.currentState) {
-    case "ENDED":
-      return "Ended";
-    case "EXPIRED":
-      return "Expired";
-    default:
-      return "Active";
-  }
 }
 
 function remainingLabel(endTime: string, now: number): string {
@@ -317,15 +296,17 @@ export function LecturerAttendancePage() {
   const catalogLoading = offerings === null && offeringsError === null;
 
   const offeringSummary = selectedOffering
-    ? `${selectedOffering.courseCode} — ${selectedOffering.courseTitle} (Level ${selectedOffering.levelName}, ${selectedOffering.semesterName})`
+    ? `${selectedOffering.courseCode} · ${selectedOffering.courseTitle} (Level ${selectedOffering.levelName}, ${selectedOffering.semesterName})`
     : "";
   return (
     <main className="app-page lecturer-attendance-page">
       <header className="app-header lecturer-attendance-header">
         <div className="lecturer-attendance-header__copy">
-          <p className="lecturer-attendance-header__eyebrow">Lecturer workspace</p>
-          <h1>Attendance Sessions</h1>
-          <p className="app-header__sub">Start and manage your attendance sessions.</p>
+          <p className="lecturer-attendance-header__eyebrow">Lecturer attendance</p>
+          <h1>Attendance sessions</h1>
+          <p className="app-header__sub">
+            Start a session, then end it when the lecture is over.
+          </p>
         </div>
         <nav className="app-header__nav" aria-label="Lecturer navigation">
           <Link to={homePathForRole("LECTURER")}>Home</Link>
@@ -336,7 +317,7 @@ export function LecturerAttendancePage() {
             disabled={isLoggingOut}
             aria-busy={isLoggingOut}
           >
-            {isLoggingOut ? "Logging out…" : "Log out"}
+            {isLoggingOut ? "Signing out…" : "Sign out"}
           </button>
         </nav>
       </header>
@@ -345,7 +326,7 @@ export function LecturerAttendancePage() {
         className="app-card app-card--wide lecturer-attendance-section lecturer-current-section"
         aria-labelledby="current-heading"
       >
-        <h2 id="current-heading">Current Session</h2>
+        <h2 id="current-heading">Current session</h2>
 
         {sessions === null && sessionsError === null ? (
           <p className="inline-status" role="status">
@@ -363,18 +344,20 @@ export function LecturerAttendancePage() {
         ) : null}
 
         {sessions !== null && activeSession === undefined ? (
-          <p className="inline-status">No active session.</p>
+          <p className="inline-status" role="status">
+            No active session.
+          </p>
         ) : null}
 
         {activeSession !== undefined ? (
           <div className="session-detail lecturer-current-session">
             <p className="session-detail__title lecturer-current-session__title">
-              {activeSession.courseCode} — {activeSession.courseTitle}
+              {activeSession.courseCode} · {activeSession.courseTitle}
             </p>
             <p>
               <span className="app-detail__label">Status: </span>
               <span className={`session-status session-status--${activeSession.currentState.toLowerCase()}`}>
-                {stateLabel(activeSession)}
+                {statusLabel(activeSession.currentState)}
               </span>
             </p>
             <div className="lecturer-session-timing">
@@ -385,21 +368,25 @@ export function LecturerAttendancePage() {
                   {formatDateTime(activeSession.startTime)}
                 </p>
                 <p>
-                  <span className="app-detail__label">Ends: </span>
+                  <span className="app-detail__label">Scheduled end: </span>
                   {formatDateTime(activeSession.endTime)}
                 </p>
               </div>
               <div className="lecturer-session-timing__item lecturer-session-timing__item--threshold">
                 <p className="lecturer-session-timing__label">Late threshold</p>
                 <p>
-                  <span className="app-detail__label">Late threshold: </span>
-                  {activeSession.lateThresholdMinutes} minutes
+                  <span className="app-detail__label">Minutes allowed: </span>
+                  {activeSession.lateThresholdMinutes}
                 </p>
               </div>
             </div>
 
+            {/*
+              A countdown that re-renders every second must not be a live
+              region: announcing every tick would flood a screen reader.
+            */}
             {activeSession.currentState === "ACTIVE" ? (
-              <p className="session-detail__countdown" aria-live="off">
+              <p className="session-detail__countdown" role="timer">
                 {remainingLabel(activeSession.endTime, now)}
               </p>
             ) : null}
@@ -455,7 +442,7 @@ export function LecturerAttendancePage() {
         className="app-card app-card--wide lecturer-attendance-section lecturer-start-section"
         aria-labelledby="start-heading"
       >
-        <h2 id="start-heading">Start an Attendance Session</h2>
+        <h2 id="start-heading">Start an attendance session</h2>
 
         {catalogLoading ? (
           <p className="inline-status" role="status">
@@ -633,14 +620,14 @@ export function LecturerAttendancePage() {
                   <p className="session-summary__title">Summary</p>
                   <p>
                     <span className="app-detail__label">Course offering: </span>
-                    {offeringSummary || "—"}
+                    {offeringSummary || "Not selected"}
                   </p>
                   <p>
                     <span className="app-detail__label">Duration: </span>
                     {durationPreset === CUSTOM
                       ? customDuration.trim() !== "" && Number.isInteger(durationMinutes)
                         ? formatDuration(durationMinutes)
-                        : "—"
+                        : "Not set"
                       : formatDuration(durationPreset)}
                   </p>
                   <p>
@@ -648,7 +635,7 @@ export function LecturerAttendancePage() {
                     {latePreset === CUSTOM
                       ? customLate.trim() !== "" && Number.isInteger(lateThresholdMinutes)
                         ? `${lateThresholdMinutes} min`
-                        : "—"
+                        : "Not set"
                       : `${latePreset} min`}
                   </p>
                 </div>
@@ -671,7 +658,7 @@ export function LecturerAttendancePage() {
         className="app-card app-card--wide lecturer-attendance-section lecturer-history-section"
         aria-labelledby="history-heading"
       >
-        <h2 id="history-heading">Session History</h2>
+        <h2 id="history-heading">Session history</h2>
 
         {sessions === null && sessionsError === null ? (
           <p className="inline-status" role="status">
@@ -684,7 +671,9 @@ export function LecturerAttendancePage() {
         ) : null}
 
         {history !== null && history.length === 0 ? (
-          <p className="inline-status">No past sessions yet.</p>
+          <p className="inline-status" role="status">
+            No past sessions yet.
+          </p>
         ) : null}
 
         {history !== null && history.length > 0 ? (
@@ -706,7 +695,7 @@ export function LecturerAttendancePage() {
                   <span
                     className={`session-status session-status--${session.currentState.toLowerCase()}`}
                   >
-                    {historyStateLabel(session)}
+                    {statusLabel(session.currentState)}
                   </span>
                 </div>
 
@@ -717,15 +706,15 @@ export function LecturerAttendancePage() {
                       <span className="app-detail__label">Started: </span>
                       {formatDateTime(session.startTime)}
                       {session.endedAt !== null
-                        ? ` – ${formatDateTime(session.endedAt)}`
+                        ? `, ended ${formatDateTime(session.endedAt)}`
                         : ""}
                     </p>
                   </div>
                   <div className="lecturer-session-timing__item lecturer-session-timing__item--threshold">
                     <p className="lecturer-session-timing__label">Late threshold</p>
                     <p className="session-list__meta">
-                      <span className="app-detail__label">Late threshold: </span>
-                      {session.lateThresholdMinutes} minutes
+                      <span className="app-detail__label">Minutes allowed: </span>
+                      {session.lateThresholdMinutes}
                     </p>
                   </div>
                 </div>

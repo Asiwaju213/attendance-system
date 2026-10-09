@@ -26,7 +26,7 @@ async function openReportsPage(page: Page): Promise<void> {
   await loginAsAdmin(page);
   await page.goto("/app/admin/attendance-reports");
   await expect(
-    page.getByRole("heading", { level: 1, name: "Attendance Reports" })
+    page.getByRole("heading", { level: 1, name: "Attendance reports" })
   ).toBeVisible();
 }
 
@@ -107,7 +107,7 @@ test("an unauthenticated user is redirected to the admin login page", async ({
 
   await expect(page).toHaveURL(/\/staff\/admin\/login$/);
   await expect(
-    page.getByRole("heading", { level: 1, name: "Admin Login" })
+    page.getByRole("heading", { level: 1, name: "Administrator Login" })
   ).toBeVisible();
 });
 
@@ -150,11 +150,11 @@ test("an admin can open the page from Admin Home and sees a course offering sele
 }) => {
   await loginAsAdmin(page);
 
-  await page.getByRole("link", { name: "Attendance Reports" }).click();
+  await page.getByRole("link", { name: "Attendance reports" }).click();
 
   await expect(page).toHaveURL(/\/app\/admin\/attendance-reports$/);
   await expect(
-    page.getByRole("heading", { level: 1, name: "Attendance Reports" })
+    page.getByRole("heading", { level: 1, name: "Attendance reports" })
   ).toBeVisible();
   await expect(
     page.getByRole("heading", { level: 2, name: "Choose a course offering" })
@@ -189,7 +189,7 @@ test("selecting E2E-101 loads its report context and enrolled student row from t
     ]);
 
     const report = reportSection(page);
-    await expect(report.getByText("E2E-101 — E2E Computer Science 101")).toBeVisible();
+    await expect(report.getByText("E2E-101 · E2E Computer Science 101")).toBeVisible();
     await expect(report.getByText("E2E-2026/2027 · First Semester")).toBeVisible();
     await expect(report.getByText("Level 100")).toBeVisible();
     await expect(report.getByText("E2E Lecturer (E2E/LEC/0001)")).toBeVisible();
@@ -304,7 +304,7 @@ test("null percentage is displayed as a dash", async ({ page }) => {
 
   const row = page.locator(".admin-table__row").filter({ hasText: "E2E/STU/0001" });
   await expect(row).toBeVisible();
-  await expect(row.locator("td").nth(6)).toHaveText("—");
+  await expect(row.locator("td").nth(6)).toHaveText("Not available");
 });
 
 test("selecting a closed offering shows the no enrolled students state", async ({
@@ -421,7 +421,7 @@ test("an API failure shows a friendly error and Retry recovers the report", asyn
   await page.getByRole("button", { name: "Retry" }).click();
 
   await expect(
-    reportSection(page).getByText("E2E-101 — E2E Computer Science 101")
+    reportSection(page).getByText("E2E-101 · E2E Computer Science 101")
   ).toBeVisible();
 });
 

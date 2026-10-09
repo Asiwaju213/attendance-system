@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { LoadingPage } from "../components/LoadingPage";
 import { useAuth } from "../app/useAuth";
+import { statusLabel } from "../lib/format";
 
 function greetingForLocalTime(): string {
   const hour = new Date().getHours();
@@ -38,13 +39,12 @@ export function AdminHomePage() {
         <div className="admin-home-header__copy">
           <p className="admin-home-header__eyebrow">Administration</p>
           <h1>Admin Home</h1>
-          <p className="admin-home-greeting">{greetingForLocalTime()}</p>
-          <p className="admin-home-header__description">
-            Manage academic setup, students, devices, and attendance operations.
+          <p className="admin-home-greeting">
+            {greetingForLocalTime()}, {user.name}
           </p>
         </div>
         <div className="admin-home-header__account">
-          <span>Signed in as Admin</span>
+          <span>Signed in as Administrator</span>
           <button
             type="button"
             className="secondary-button"
@@ -52,7 +52,7 @@ export function AdminHomePage() {
             disabled={isLoggingOut}
             aria-busy={isLoggingOut}
           >
-            {isLoggingOut ? "Logging out…" : "Log out"}
+            {isLoggingOut ? "Signing out…" : "Sign out"}
           </button>
         </div>
       </header>
@@ -67,7 +67,7 @@ export function AdminHomePage() {
         </p>
         <p>
           <span>Role: </span>
-          {user.role}
+          {statusLabel(user.role)}
         </p>
         <p>
           <span>Username: </span>
@@ -78,26 +78,25 @@ export function AdminHomePage() {
       <div className="admin-groups">
         <section className="admin-group" aria-labelledby="admin-academic-heading">
           <header className="admin-group__header">
-            <p>Academic setup</p>
-            <h2 id="admin-academic-heading">Structure your academic workspace</h2>
+            <h2 id="admin-academic-heading">Academic setup</h2>
           </header>
           <ul className="admin-action-list">
             <li>
               <Link to="/app/admin/academic-periods">
-                <span>Academic Sessions &amp; Semesters</span>
-                <small>Manage academic periods and semesters.</small>
+                <span>Academic sessions and semesters</span>
+                <small>Choose the active session and the semester names.</small>
               </Link>
             </li>
             <li>
               <Link to="/app/admin/courses">
-                <span>Course Management</span>
-                <small>Maintain courses and their academic details.</small>
+                <span>Course management</span>
+                <small>Add courses and set their level and owning department.</small>
               </Link>
             </li>
             <li>
               <Link to="/app/admin/course-offerings">
-                <span>Course Offerings</span>
-                <small>Manage course offerings and teaching assignments.</small>
+                <span>Course offerings</span>
+                <small>Schedule courses for a session and assign lecturers.</small>
               </Link>
             </li>
           </ul>
@@ -105,26 +104,25 @@ export function AdminHomePage() {
 
         <section className="admin-group" aria-labelledby="admin-students-heading">
           <header className="admin-group__header">
-            <p>Student management</p>
-            <h2 id="admin-students-heading">Support your student community</h2>
+            <h2 id="admin-students-heading">Student management</h2>
           </header>
           <ul className="admin-action-list">
             <li>
               <Link to="/app/admin/students">
-                <span>Student Management</span>
-                <small>Review and manage student records.</small>
+                <span>Student management</span>
+                <small>Search accounts and change their status.</small>
               </Link>
             </li>
             <li>
               <Link to="/app/admin/students/import">
-                <span>Student Import</span>
-                <small>Import student records from a prepared file.</small>
+                <span>Student import</span>
+                <small>Create accounts in bulk from a workbook.</small>
               </Link>
             </li>
             <li>
               <Link to="/app/admin/student-devices">
-                <span>Student Device Administration</span>
-                <small>Review and reset student attendance devices.</small>
+                <span>Student device administration</span>
+                <small>Revoke a device that must be replaced.</small>
               </Link>
             </li>
           </ul>
@@ -132,20 +130,19 @@ export function AdminHomePage() {
 
         <section className="admin-group admin-group--primary" aria-labelledby="admin-attendance-heading">
           <header className="admin-group__header">
-            <p>Attendance operations</p>
-            <h2 id="admin-attendance-heading">Monitor attendance activity</h2>
+            <h2 id="admin-attendance-heading">Attendance</h2>
           </header>
           <ul className="admin-action-list">
             <li>
               <Link className="admin-action-link--primary" to="/app/admin/attendance">
-                <span>Attendance Monitoring</span>
-                <small>Review and manage attendance sessions.</small>
+                <span>Attendance monitoring</span>
+                <small>Open a session to review its records or correct a status.</small>
               </Link>
             </li>
             <li>
               <Link to="/app/admin/attendance-reports">
-                <span>Attendance Reports</span>
-                <small>Review attendance summaries and records.</small>
+                <span>Attendance reports</span>
+                <small>Summarise completed sessions for a course offering.</small>
               </Link>
             </li>
           </ul>

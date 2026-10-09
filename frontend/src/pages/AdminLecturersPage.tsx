@@ -5,6 +5,7 @@ import { ApiError } from "../api/client";
 import { createAdminLecturer, listAdminLecturers } from "../api/adminLecturers";
 import { listAdminDepartments } from "../api/adminOrganization";
 import { FormError } from "../components/FormError";
+import { statusLabel } from "../lib/format";
 import type { AdminDepartment } from "../types/adminOrganization";
 import type { AdminLecturer } from "../types/adminLecturer";
 
@@ -221,10 +222,9 @@ export function AdminLecturersPage() {
       <header className="app-header admin-page-header">
         <div>
           <p className="admin-page-header__eyebrow">Administration</p>
-          <h1>Lecturer Management</h1>
+          <h1>Lecturer management</h1>
           <p className="app-header__sub">
-            Create lecturer accounts and issue the temporary password each lecturer changes at
-            first sign-in.
+            Lecturer accounts and the temporary password each lecturer replaces at first sign-in.
           </p>
         </div>
         <nav className="app-header__nav" aria-label="Admin navigation">
@@ -249,7 +249,7 @@ export function AdminLecturersPage() {
 
       {lecturers !== null && lecturers.length === 0 ? (
         <div className="admin-empty">
-          <p className="form-error admin-empty__message" role="status">
+          <p className="admin-empty__message" role="status">
             No lecturers found.
           </p>
           <p className="inline-status">
@@ -295,7 +295,7 @@ export function AdminLecturersPage() {
                             : "student-status--inactive"
                         }`}
                       >
-                        {lecturer.status}
+                        {statusLabel(lecturer.status)}
                       </span>
                     </td>
                     <td>
@@ -323,8 +323,8 @@ export function AdminLecturersPage() {
           <h2 id="created-credential-heading">Lecturer account created</h2>
           <p className="note">
             {credential.name} signs in with staff ID <strong>{credential.staffId}</strong> and
-            must replace this temporary password at first sign-in. Copy it now: it is not stored
-            in readable form and cannot be shown again.
+            must replace this temporary password at first sign-in. Copy it now: it cannot be shown
+            again.
           </p>
           <div className="confirm-row">
             <span className="credential-secret">
@@ -338,6 +338,7 @@ export function AdminLecturersPage() {
               type="button"
               className="secondary-button"
               onClick={() => setIsPasswordVisible((visible) => !visible)}
+              aria-pressed={isPasswordVisible}
             >
               {isPasswordVisible ? "Hide password" : "Show password"}
             </button>
@@ -345,15 +346,15 @@ export function AdminLecturersPage() {
               Copy password
             </button>
             <button type="button" className="secondary-button" onClick={dismissCredential}>
-              Done
+              Close
             </button>
-            <span className="inline-status" role="status">
-              {copyState === "copied"
-                ? "Password copied."
-                : copyState === "failed"
-                  ? "Copy failed. Reveal the password and copy it manually."
-                  : ""}
-            </span>
+            {copyState !== "idle" ? (
+              <span className="inline-status" role="status">
+                {copyState === "copied"
+                  ? "Password copied."
+                  : "Copy failed. Reveal the password and copy it manually."}
+              </span>
+            ) : null}
           </div>
         </section>
       ) : null}
@@ -362,10 +363,10 @@ export function AdminLecturersPage() {
         className="app-card app-card--wide admin-compact-form-card"
         aria-labelledby="create-lecturer-heading"
       >
-        <h2 id="create-lecturer-heading">Create Lecturer</h2>
+        <h2 id="create-lecturer-heading">Create lecturer</h2>
         <p className="note">
-          The lecturer signs in with the staff ID and is restricted to the password-change screen
-          until the temporary password is replaced.
+          The lecturer signs in with the staff ID and can only reach the password-change page until
+          the temporary password is replaced.
         </p>
         <form
           className="admin-inline-form admin-compact-form"

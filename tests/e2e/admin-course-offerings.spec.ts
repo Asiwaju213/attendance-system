@@ -19,7 +19,7 @@ async function openIndexPage(page: Page): Promise<void> {
   await loginAsAdmin(page);
   await page.goto(INDEX_PAGE);
   await expect(
-    page.getByRole("heading", { level: 1, name: "Course Offerings" })
+    page.getByRole("heading", { level: 1, name: "Course offerings" })
   ).toBeVisible();
 }
 
@@ -30,7 +30,7 @@ test("an unauthenticated user is redirected to the admin login page", async ({
 
   await expect(page).toHaveURL(/\/staff\/admin\/login$/);
   await expect(
-    page.getByRole("heading", { level: 1, name: "Admin Login" })
+    page.getByRole("heading", { level: 1, name: "Administrator Login" })
   ).toBeVisible();
 });
 
@@ -72,11 +72,11 @@ test("Admin can navigate from Admin Home to Course Offerings", async ({
   page,
 }) => {
   await loginAsAdmin(page);
-  await page.getByRole("link", { name: "Course Offerings" }).click();
+  await page.getByRole("link", { name: "Course offerings" }).click();
 
   await expect(page).toHaveURL(new RegExp(`${INDEX_PAGE}$`));
   await expect(
-    page.getByRole("heading", { level: 1, name: "Course Offerings" })
+    page.getByRole("heading", { level: 1, name: "Course offerings" })
   ).toBeVisible();
 });
 
@@ -101,8 +101,8 @@ test("offerings are displayed with session, semester, and status context", async
   await expect(page.getByText("E2E-2026/2027").first()).toBeVisible();
   await expect(page.getByText("First Semester").first()).toBeVisible();
   await expect(page.getByText("Level 100").first()).toBeVisible();
-  await expect(page.getByText("OPEN").first()).toBeVisible();
-  await expect(page.getByText("CLOSED").first()).toBeVisible();
+  await expect(page.getByText("Open").first()).toBeVisible();
+  await expect(page.getByText("Closed").first()).toBeVisible();
 });
 
 test("each offering row provides a roster action/link", async ({ page }) => {
@@ -129,7 +129,7 @@ test("clicking the roster action reaches the roster page", async ({ page }) => {
 
   await expect(page).toHaveURL(/\/app\/admin\/course-offerings\/\d+\/roster$/);
   await expect(
-    page.getByRole("heading", { level: 1, name: "Course Offering Roster" })
+    page.getByRole("heading", { level: 1, name: "Course offering roster" })
   ).toBeVisible();
 });
 
@@ -145,7 +145,7 @@ test("empty state is shown when there are no offerings", async ({ page }) => {
   await page.goto(INDEX_PAGE);
 
   await expect(
-    page.getByRole("heading", { level: 1, name: "Course Offerings" })
+    page.getByRole("heading", { level: 1, name: "Course offerings" })
   ).toBeVisible();
   await expect(page.getByText("No course offerings found.")).toBeVisible();
   await expect(page.locator(".admin-table__row")).toHaveCount(0);

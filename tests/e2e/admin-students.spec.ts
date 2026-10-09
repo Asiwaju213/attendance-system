@@ -30,7 +30,7 @@ async function openStudentsPage(page: Page): Promise<void> {
   await loginAsAdmin(page);
   await page.goto("/app/admin/students");
   await expect(
-    page.getByRole("heading", { level: 1, name: "Student Management" })
+    page.getByRole("heading", { level: 1, name: "Student management" })
   ).toBeVisible();
 }
 
@@ -86,7 +86,7 @@ test("an unauthenticated user is redirected to the admin login page", async ({
 
   await expect(page).toHaveURL(/\/staff\/admin\/login$/);
   await expect(
-    page.getByRole("heading", { level: 1, name: "Admin Login" })
+    page.getByRole("heading", { level: 1, name: "Administrator Login" })
   ).toBeVisible();
 });
 
@@ -131,7 +131,7 @@ test("the admin home links to student management and the page renders", async ({
 }) => {
   await loginAsAdmin(page);
 
-  const link = page.getByRole("link", { name: "Student Management" });
+  const link = page.getByRole("link", { name: "Student management" });
   await expect(link).toBeVisible();
   await expect(link).toHaveAttribute("href", "/app/admin/students");
 
@@ -139,7 +139,7 @@ test("the admin home links to student management and the page renders", async ({
 
   await expect(page).toHaveURL(/\/app\/admin\/students$/);
   await expect(
-    page.getByRole("heading", { level: 1, name: "Student Management" })
+    page.getByRole("heading", { level: 1, name: "Student management" })
   ).toBeVisible();
   await expect(
     page.getByText(
@@ -165,7 +165,7 @@ test("the list shows the management students with their statuses and count", asy
     studentRow(page, E2E_STUDENT_ACTIVE_MANAGEMENT.matricNumber)
       .locator(".student-status")
       .first()
-  ).toHaveText("ACTIVE");
+  ).toHaveText("Active");
 
   await expect(
     studentRow(page, E2E_STUDENT_INACTIVE_MANAGEMENT.matricNumber)
@@ -174,7 +174,7 @@ test("the list shows the management students with their statuses and count", asy
     studentRow(page, E2E_STUDENT_INACTIVE_MANAGEMENT.matricNumber)
       .locator(".student-status")
       .first()
-  ).toHaveText("INACTIVE");
+  ).toHaveText("Inactive");
 
   await expect(
     studentRow(page, E2E_STUDENT_PENDING_MANAGEMENT.matricNumber)
@@ -183,7 +183,7 @@ test("the list shows the management students with their statuses and count", asy
     studentRow(page, E2E_STUDENT_PENDING_MANAGEMENT.matricNumber)
       .locator(".student-status")
       .first()
-  ).toHaveText("PENDING");
+  ).toHaveText("Pending");
 
   await expect(
     studentRow(page, E2E_STUDENT_RESET_MANAGEMENT.matricNumber)
@@ -192,7 +192,7 @@ test("the list shows the management students with their statuses and count", asy
     studentRow(page, E2E_STUDENT_RESET_MANAGEMENT.matricNumber)
       .locator(".student-status")
       .first()
-  ).toHaveText("ACTIVE");
+  ).toHaveText("Active");
 });
 
 test("the matric and name filters narrow the list", async ({ page }) => {
@@ -368,7 +368,7 @@ test("the detail view shows only safe information for an inactive student", asyn
   await expect(detail).toContainText("E2E Test Faculty (E2EFAC)");
   await expect(detail).toContainText("E2E Test Department (E2EFLOW)");
   await expect(detail).toContainText("Level 100");
-  await expect(detail).toContainText("INACTIVE");
+  await expect(detail).toContainText("Inactive");
   await expect(detail).toContainText("No device");
   await expect(detail).toContainText("Created:");
   await expect(detail).toContainText("Enrolled Courses:");
@@ -383,7 +383,7 @@ test("a pending student has no status control", async ({ page }) => {
   await filterToStudent(page, E2E_STUDENT_PENDING_MANAGEMENT.matricNumber);
 
   const row = studentRow(page, E2E_STUDENT_PENDING_MANAGEMENT.matricNumber);
-  await expect(row.locator(".student-status").first()).toHaveText("PENDING");
+  await expect(row.locator(".student-status").first()).toHaveText("Pending");
   await expect(row.getByRole("button", { name: "Deactivate" })).toHaveCount(0);
   await expect(row.getByRole("button", { name: "Reactivate" })).toHaveCount(0);
   await expect(row.getByRole("button", { name: "Reset registration" })).toHaveCount(0);
@@ -419,7 +419,7 @@ test("an admin can deactivate an active student", async ({ page }) => {
     "no longer be able to sign in"
   );
 
-  await page.getByRole("button", { name: "Confirm Deactivate" }).click();
+  await page.getByRole("button", { name: "Confirm deactivate" }).click();
 
   await expect(page.locator(".resource-success")).toContainText("deactivated");
   await expect(row.locator(".student-status--inactive")).toBeVisible();
@@ -446,7 +446,7 @@ test("an activation that the backend rejects renders the ACTIVE_REQUIRES_PASSWOR
 
   const row = studentRow(page, E2E_STUDENT_ACTIVE_MANAGEMENT.matricNumber);
   await row.getByRole("button", { name: "Reactivate" }).click();
-  await page.getByRole("button", { name: "Confirm Reactivate" }).click();
+  await page.getByRole("button", { name: "Confirm reactivate" }).click();
 
   await expect(page.locator(".resource-error")).toContainText(
     "cannot be activated"
@@ -464,7 +464,7 @@ test("an admin can reactivate an inactive student", async ({ page }) => {
   await row.getByRole("button", { name: "Reactivate" }).click();
   await expect(page.locator(".confirm-message")).toContainText("sign in again");
 
-  await page.getByRole("button", { name: "Confirm Reactivate" }).click();
+  await page.getByRole("button", { name: "Confirm reactivate" }).click();
 
   await expect(page.locator(".resource-success")).toContainText("reactivated");
   await expect(row.locator(".student-status--active")).toBeVisible();
@@ -490,7 +490,7 @@ test("a NO_OP status change renders the backend conflict error", async ({
 
   const row = studentRow(page, E2E_STUDENT_ACTIVE_MANAGEMENT.matricNumber);
   await row.getByRole("button", { name: "Deactivate" }).click();
-  await page.getByRole("button", { name: "Confirm Deactivate" }).click();
+  await page.getByRole("button", { name: "Confirm deactivate" }).click();
 
   await expect(page.locator(".resource-error")).toContainText(
     "already has this status"
@@ -519,7 +519,7 @@ test("an invalid reset renders the INVALID_STUDENT_STATE rejection", async ({
 
   const row = studentRow(page, E2E_STUDENT_ACTIVE_MANAGEMENT.matricNumber);
   await row.getByRole("button", { name: "Reset registration" }).click();
-  await page.getByRole("button", { name: "Confirm Reset" }).click();
+  await page.getByRole("button", { name: "Confirm reset" }).click();
 
   await expect(page.locator(".resource-error")).toContainText(
     "Only active students can have their registration reset."
@@ -548,7 +548,7 @@ test("a missing student renders the NOT_FOUND handling on reset", async ({
 
   const row = studentRow(page, E2E_STUDENT_ACTIVE_MANAGEMENT.matricNumber);
   await row.getByRole("button", { name: "Reset registration" }).click();
-  await page.getByRole("button", { name: "Confirm Reset" }).click();
+  await page.getByRole("button", { name: "Confirm reset" }).click();
 
   await expect(page.locator(".resource-error")).toContainText(
     "The student was not found."
@@ -572,14 +572,14 @@ test("a student can enroll a device for device-column coverage", async ({
   await addVirtualAuthenticator(page);
   await page.goto("/app/student/device");
   await expect(
-    page.getByRole("heading", { level: 1, name: "Device Enrollment" })
+    page.getByRole("heading", { level: 1, name: "Device enrollment" })
   ).toBeVisible();
   await expect(page.locator(".device-status--none")).toContainText(
-    "No Active Device"
+    "No active device"
   );
 
-  await page.getByLabel("Device Label (optional)").fill(MANAGEMENT_DEVICE_LABEL);
-  await page.getByRole("button", { name: "Register This Device" }).click();
+  await page.getByLabel("Device label (optional)").fill(MANAGEMENT_DEVICE_LABEL);
+  await page.getByRole("button", { name: "Register this device" }).click();
 
   await expect(page.locator(".device-enrolled")).toContainText("Device Active", {
     timeout: 15_000,
@@ -598,7 +598,7 @@ test("the admin sees the enrolled device as active and summarized safely", async
 
   await row.getByRole("button", { name: "View details" }).click();
   const detail = page.getByRole("region", { name: "Student details" });
-  await expect(detail).toContainText("Device Summary");
+  await expect(detail).toContainText("Device");
   await expect(detail).toContainText(MANAGEMENT_DEVICE_LABEL);
   await expect(detail).toContainText("Enrolled");
 
@@ -632,13 +632,13 @@ test("resetting a student's registration explains the consequences and clears th
 
   const confirm = page.locator(".confirm-row--block");
   await expect(confirm).toContainText("Reset registration for");
-  await expect(confirm).toContainText("return their account to PENDING");
+  await expect(confirm).toContainText("return their account to Pending registration");
   await expect(confirm).toContainText("clear their password");
   await expect(confirm).toContainText("complete student registration again");
   await expect(confirm).toContainText("keep their enrolled-course history intact");
   await expect(confirm).toContainText("retain their existing active device for now");
 
-  await page.getByRole("button", { name: "Confirm Reset" }).click();
+  await page.getByRole("button", { name: "Confirm reset" }).click();
 
   await expect(page.locator(".resource-success")).toContainText("now pending");
   await expect(row.locator(".student-status--pending")).toBeVisible();
@@ -728,7 +728,7 @@ test("sensitive credential material is never rendered on the page", async ({
   await row.getByRole("button", { name: "View details" }).click();
   await expect(
     page.getByRole("region", { name: "Student details" })
-  ).toContainText("Device Summary");
+  ).toContainText("Device");
 
   const studentId = await getStudentId(
     page,

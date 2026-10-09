@@ -7,6 +7,7 @@ import {
   listAdminCourseOfferings,
 } from "../api/attendance";
 import { downloadAttendanceReport } from "../lib/attendanceReportExcel";
+import { formatPercentage } from "../lib/format";
 import type {
   AdminCourseOffering,
   CourseOfferingAttendanceReport,
@@ -33,10 +34,6 @@ function reportErrorMessage(error: unknown): string {
     }
   }
   return attendanceErrorMessage(error);
-}
-
-function formatPercentage(value: number | null): string {
-  return value === null ? "—" : `${value.toFixed(2)}%`;
 }
 
 export function AdminAttendanceReportsPage() {
@@ -157,7 +154,7 @@ export function AdminAttendanceReportsPage() {
       (offerings ?? [])
         .map((offering) => ({
           value: String(offering.id),
-          label: `${offering.courseCode} — ${offering.courseTitle} · ${offering.academicSessionName} · ${offering.semesterName}`,
+          label: `${offering.courseCode} · ${offering.courseTitle} · ${offering.academicSessionName} · ${offering.semesterName}`,
         }))
         .sort((a, b) => a.label.localeCompare(b.label)),
     [offerings]
@@ -177,12 +174,12 @@ export function AdminAttendanceReportsPage() {
       <header className="app-header admin-page-header">
         <div>
           <p className="admin-page-header__eyebrow">Administration</p>
-          <h1>Attendance Reports</h1>
+          <h1>Attendance reports</h1>
           <p className="app-header__sub">
-            Attendance summaries for a course offering.
+            Attendance totals for a course offering, across all lecturers.
           </p>
         </div>
-        <nav className="app-header__nav">
+        <nav className="app-header__nav" aria-label="Admin navigation">
           <Link to="/app/admin">Back to Admin Home</Link>
         </nav>
       </header>
@@ -227,10 +224,10 @@ export function AdminAttendanceReportsPage() {
 
       <section
         className="app-card app-card--wide"
-        aria-label="Attendance report"
+        aria-labelledby="attendance-report-heading"
       >
         <div className="admin-detail__header">
-          <h2>Report</h2>
+          <h2 id="attendance-report-heading">Attendance report</h2>
           <div className="report-actions">
             {exportError !== null ? (
               <p role="alert" className="form-error">
@@ -250,7 +247,7 @@ export function AdminAttendanceReportsPage() {
         </div>
         {selectedId === null ? (
           <div className="admin-empty">
-            <p className="form-error admin-empty__message" role="status">
+            <p className="admin-empty__message" role="status">
               Select a course offering to view its attendance report.
             </p>
             <p className="inline-status">
@@ -280,7 +277,7 @@ export function AdminAttendanceReportsPage() {
             <div className="session-detail admin-detail">
               <p>
                 <span className="app-detail__label">Course: </span>
-                {context.courseCode} — {context.courseTitle}
+                {context.courseCode} · {context.courseTitle}
               </p>
               <p>
                 <span className="app-detail__label">Academic session: </span>
@@ -308,7 +305,7 @@ export function AdminAttendanceReportsPage() {
 
             {noEnrolledStudents ? (
               <div className="admin-empty">
-                <p className="form-error admin-empty__message" role="status">
+                <p className="admin-empty__message" role="status">
                   No students are enrolled in this course offering.
                 </p>
               </div>
@@ -325,7 +322,7 @@ export function AdminAttendanceReportsPage() {
                     <thead>
                       <tr>
                         <th scope="col">Student</th>
-                        <th scope="col">Matric No.</th>
+                        <th scope="col">Matric Number</th>
                         <th scope="col">Sessions</th>
                         <th scope="col">Present</th>
                         <th scope="col">Late</th>

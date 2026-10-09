@@ -9,7 +9,7 @@ const MANAGEMENT_COURSE_CODE = "E2EMGMT-101";
 const MANAGEMENT_COURSE_TITLE = "E2E Management Computer Science 101";
 const MANAGEMENT_COURSE_TITLE_UPDATED = "E2E Management Computer Science 101 Rev.";
 const E2E_DEPARTMENT_LABEL = "E2E Test Department (E2EFLOW)";
-const E2E_LECTURER_LABEL = "E2E Lecturer (E2E/LEC/0001) — E2E Test Department";
+const E2E_LECTURER_LABEL = "E2E Lecturer (E2E/LEC/0001) · E2E Test Department";
 
 async function loginAsAdmin(page: Page): Promise<void> {
   await page.goto("/staff/admin/login");
@@ -25,7 +25,7 @@ async function openCoursesPage(page: Page): Promise<void> {
   await loginAsAdmin(page);
   await page.goto(COURSES_PAGE);
   await expect(
-    page.getByRole("heading", { level: 1, name: "Course Management" })
+    page.getByRole("heading", { level: 1, name: "Course management" })
   ).toBeVisible();
 }
 
@@ -38,7 +38,7 @@ test("an unauthenticated user is redirected to the admin login page", async ({
 
   await expect(page).toHaveURL(/\/staff\/admin\/login$/);
   await expect(
-    page.getByRole("heading", { level: 1, name: "Admin Login" })
+    page.getByRole("heading", { level: 1, name: "Administrator Login" })
   ).toBeVisible();
 });
 
@@ -80,11 +80,11 @@ test("Admin can navigate from Admin Home to Course Management", async ({
   page,
 }) => {
   await loginAsAdmin(page);
-  await page.getByRole("link", { name: "Course Management" }).click();
+  await page.getByRole("link", { name: "Course management" }).click();
 
   await expect(page).toHaveURL(new RegExp(`${COURSES_PAGE}$`));
   await expect(
-    page.getByRole("heading", { level: 1, name: "Course Management" })
+    page.getByRole("heading", { level: 1, name: "Course management" })
   ).toBeVisible();
 });
 
@@ -118,7 +118,7 @@ test("Admin can create a course and the course appears in the list", async ({
   await expect(row.getByText(MANAGEMENT_COURSE_TITLE)).toBeVisible();
   await expect(row.getByText("Level 100")).toBeVisible();
   await expect(row.getByText("E2E Test Department")).toBeVisible();
-  await expect(row.getByText("ACTIVE")).toBeVisible();
+  await expect(row.getByText("Active")).toBeVisible();
 });
 
 test("attempting to reuse a course code shows a conflict error", async ({
@@ -170,13 +170,13 @@ test("Admin can deactivate and reactivate a course", async ({ page }) => {
     .locator(".admin-table__row")
     .filter({ hasText: MANAGEMENT_COURSE_CODE })
     .first();
-  await expect(row.getByText("ACTIVE")).toBeVisible();
+  await expect(row.getByText("Active")).toBeVisible();
 
   await row.getByRole("button", { name: "Deactivate" }).click();
-  await expect(row.getByText("INACTIVE")).toBeVisible();
+  await expect(row.getByText("Inactive")).toBeVisible();
 
   await row.getByRole("button", { name: "Activate" }).click();
-  await expect(row.getByText("ACTIVE")).toBeVisible();
+  await expect(row.getByText("Active")).toBeVisible();
 });
 
 test("Admin can create an offering and manage its lecturers", async ({
@@ -185,10 +185,10 @@ test("Admin can create an offering and manage its lecturers", async ({
   await loginAsAdmin(page);
   await page.goto("/app/admin/course-offerings");
   await expect(
-    page.getByRole("heading", { level: 1, name: "Course Offerings" })
+    page.getByRole("heading", { level: 1, name: "Course offerings" })
   ).toBeVisible();
 
-  const offeringOptionLabel = `${MANAGEMENT_COURSE_CODE} — ${MANAGEMENT_COURSE_TITLE_UPDATED} (Level 100)`;
+  const offeringOptionLabel = `${MANAGEMENT_COURSE_CODE} · ${MANAGEMENT_COURSE_TITLE_UPDATED} (Level 100)`;
   await page
     .getByLabel("Course", { exact: true })
     .selectOption({ label: offeringOptionLabel });
@@ -211,7 +211,7 @@ test("Admin can create an offering and manage its lecturers", async ({
     .filter({ hasText: MANAGEMENT_COURSE_CODE })
     .first();
   await expect(offeringRow).toBeVisible();
-  await expect(offeringRow.getByText("OPEN")).toBeVisible();
+  await expect(offeringRow.getByText("Open")).toBeVisible();
 
   await offeringRow.getByRole("button", { name: "Lecturers" }).click();
   await expect(

@@ -182,16 +182,16 @@ export function StudentRegisterPage() {
   return (
     <AuthShell
       title="Student Registration"
-      eyebrow="Account Activation"
-      description="Activate your student account to access course registration and attendance."
+      eyebrow="Account activation"
+      description="Activate your student account to register for courses and mark attendance."
       subtitle={
         step === "matric"
-          ? "Enter your matric number to begin registration."
-          : "Your account is being registered. Set a password to finish."
+          ? "Enter the matric number on your admission letter."
+          : "Check the details below, then choose a password."
       }
       footer={
         <>
-          <Link to="/login">Back to Student Login</Link>
+          <Link to="/login">Back to student login</Link>
         </>
       }
     >
@@ -247,7 +247,7 @@ export function StudentRegisterPage() {
           <form onSubmit={handlePasswordSubmit} noValidate>
             {formError !== null ? <FormError message={formError} /> : null}
             <div className="identity-preview">
-              <p className="identity-preview__label">Verified Identity</p>
+              <p className="identity-preview__label">Verified details</p>
               <dl className="identity-preview__details">
                 <dt>Name</dt>
                 <dd>{identity.name}</dd>
@@ -261,7 +261,7 @@ export function StudentRegisterPage() {
                 <dd>Level {identity.level.name}</dd>
               </dl>
             </div>
-            <p className="note">The details above are set for your new account and cannot be changed.</p>
+            <p className="note">These details come from the registry and cannot be changed here.</p>
             <Field
               label="Password"
               name="password"
@@ -298,7 +298,7 @@ export function StudentRegisterPage() {
                 disabled={isSubmitting}
                 aria-busy={isSubmitting}
               >
-                {isSubmitting ? "Registering…" : "Complete Registration"}
+                {isSubmitting ? "Registering…" : "Complete registration"}
               </button>
             </div>
           </form>

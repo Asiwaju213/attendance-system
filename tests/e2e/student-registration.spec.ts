@@ -16,7 +16,7 @@ async function verifyMatric(page: Page, matricNumber: string): Promise<void> {
 async function completeRegistration(page: Page): Promise<void> {
   await page.getByLabel("Password", { exact: true }).fill(NEW_PASSWORD);
   await page.getByLabel("Confirm Password", { exact: true }).fill(NEW_PASSWORD);
-  await page.getByRole("button", { name: "Complete Registration" }).click();
+  await page.getByRole("button", { name: "Complete registration" }).click();
 }
 
 async function loginAsStudent(page: Page): Promise<void> {
@@ -37,7 +37,7 @@ test.describe("Student Registration", () => {
     await expect(page.getByRole("heading", { level: 1, name: "Student Registration" })).toBeVisible();
     await expect(page.getByLabel("Matric Number")).toBeVisible();
     await expect(page.getByRole("button", { name: "Continue" })).toBeVisible();
-    await expect(page.getByRole("link", { name: "Back to Student Login" })).toBeVisible();
+    await expect(page.getByRole("link", { name: "Back to student login" })).toBeVisible();
   });
 
   test("student login page links to registration", async ({ page }) => {
@@ -73,7 +73,7 @@ test.describe("Student Registration", () => {
     await expect(page.locator(".identity-preview__details")).toContainText(E2E_STUDENT_PENDING.matricNumber);
     await expect(page.getByLabel("Password", { exact: true })).toBeVisible();
     await expect(page.getByLabel("Confirm Password", { exact: true })).toBeVisible();
-    await expect(page.getByRole("button", { name: "Complete Registration" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Complete registration" })).toBeVisible();
     await expect(page.getByRole("button", { name: "Request a new verification" })).toBeVisible();
 
     // The verified identity is read-only: there is no editable identity/matric field.
@@ -84,7 +84,7 @@ test.describe("Student Registration", () => {
     await verifyMatric(page, E2E_STUDENT_PENDING.matricNumber);
     await page.getByLabel("Password", { exact: true }).fill("short");
     await page.getByLabel("Confirm Password", { exact: true }).fill("short");
-    await page.getByRole("button", { name: "Complete Registration" }).click();
+    await page.getByRole("button", { name: "Complete registration" }).click();
     await expect(page.getByText("at least 8 characters")).toBeVisible();
     await expect(page.getByLabel("Confirm Password", { exact: true })).toBeVisible();
   });
@@ -93,7 +93,7 @@ test.describe("Student Registration", () => {
     await verifyMatric(page, E2E_STUDENT_PENDING.matricNumber);
     await page.getByLabel("Password", { exact: true }).fill("validpassword123");
     await page.getByLabel("Confirm Password", { exact: true }).fill("differentpassword");
-    await page.getByRole("button", { name: "Complete Registration" }).click();
+    await page.getByRole("button", { name: "Complete registration" }).click();
     await expect(page.getByText("Passwords do not match")).toBeVisible();
     await expect(page.getByLabel("Confirm Password", { exact: true })).toBeVisible();
   });
@@ -162,7 +162,7 @@ test.describe("Student Registration", () => {
     // A failed (too short) submission keeps the password out of storage too.
     await page.getByLabel("Password", { exact: true }).fill("short");
     await page.getByLabel("Confirm Password", { exact: true }).fill("short");
-    await page.getByRole("button", { name: "Complete Registration" }).click();
+    await page.getByRole("button", { name: "Complete registration" }).click();
     await expect(page.getByText("at least 8 characters")).toBeVisible();
     expect(await storageDump()).not.toContain("short");
     expect(await storageDump()).not.toMatch(/password/i);

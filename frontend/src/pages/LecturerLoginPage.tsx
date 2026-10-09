@@ -58,9 +58,9 @@ export function LecturerLoginPage() {
   return (
     <AuthShell
       title="Lecturer Login"
-      eyebrow="Lecturer Access"
-      description="Manage attendance sessions and review attendance records."
-      subtitle="Sign in with your staff ID to continue."
+      eyebrow="Lecturer access"
+      description="Sign in to run attendance sessions and review attendance records."
+      subtitle="Use the staff ID issued to you."
       footer={<Link to="/staff/login">Back to staff login</Link>}
     >
       <form onSubmit={handleSubmit} noValidate>

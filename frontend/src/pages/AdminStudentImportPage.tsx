@@ -244,9 +244,9 @@ export function AdminStudentImportPage() {
       <header className="app-header admin-page-header">
         <div>
           <p className="admin-page-header__eyebrow">Administration</p>
-          <h1>Student Import</h1>
+          <h1>Student import</h1>
           <p className="app-header__sub">
-            Upload a student workbook to create student accounts in bulk.
+            Create student accounts in bulk from a workbook.
           </p>
         </div>
         <nav className="app-header__nav" aria-label="Admin navigation">
@@ -255,7 +255,7 @@ export function AdminStudentImportPage() {
       </header>
 
       <section className="app-card" aria-labelledby="import-settings-heading">
-        <h2 id="import-settings-heading">Import Settings</h2>
+        <h2 id="import-settings-heading">Import settings</h2>
 
         {catalogError !== null ? (
           <div className="resource-error">
@@ -315,16 +315,16 @@ export function AdminStudentImportPage() {
           </div>
         </div>
         <p className="admin-filter-note">
-          Imported students are attached to the selected department and level.
+          Every imported student is created in the department and level selected here.
         </p>
       </section>
 
       <section className="app-card" aria-labelledby="upload-heading">
-        <h2 id="upload-heading">Upload Student Data</h2>
+        <h2 id="upload-heading">Upload workbook</h2>
         <p className="admin-filter-note">
-          The workbook must be an .xlsx file whose first row contains
-          &ldquo;Student Name&rdquo; and &ldquo;Matric Number&rdquo; columns. The
-          template already has those columns.
+          The workbook must be an .xlsx file. Its first row must contain
+          &ldquo;Student Name&rdquo; and &ldquo;Matric Number&rdquo; columns; the
+          template below already has them.
         </p>
 
         <div className="confirm-row">
@@ -342,8 +342,13 @@ export function AdminStudentImportPage() {
 
         <div className="field">
           <label htmlFor={fileInputId} className="field__label">
-            Student Data Workbook
+            Student data workbook
           </label>
+          {/*
+            The visible "Choose .xlsx file" button proxies to this input, so the
+            input is hidden from both the accessibility tree and the tab order.
+            The label above is what names the control for assistive technology.
+          */}
           <input
             id={fileInputId}
             ref={fileInputRef}
@@ -351,6 +356,8 @@ export function AdminStudentImportPage() {
             type="file"
             accept=".xlsx"
             onChange={handleFileChange}
+            tabIndex={-1}
+            aria-hidden="true"
           />
           {file === null ? (
             <button
@@ -366,22 +373,22 @@ export function AdminStudentImportPage() {
               <span className="import-file-chip__size">
                 {formatFileSize(file.size)}
               </span>
-              <div className="confirm-actions">
-                <button
-                  type="button"
-                  className="secondary-button"
-                  onClick={triggerFilePicker}
-                >
-                  Change
-                </button>
-                <button
-                  type="button"
-                  className="secondary-button"
-                  onClick={clearFile}
-                >
-                  Remove
-                </button>
-              </div>
+<div className="confirm-actions">
+                  <button
+                    type="button"
+                    className="secondary-button"
+                    onClick={triggerFilePicker}
+                  >
+                    Change file
+                  </button>
+                  <button
+                    type="button"
+                    className="secondary-button"
+                    onClick={clearFile}
+                  >
+                    Remove file
+                  </button>
+                </div>
             </div>
           )}
           {fileError !== null ? <FormError message={fileError} /> : null}
@@ -396,7 +403,7 @@ export function AdminStudentImportPage() {
             onClick={handlePreview}
             disabled={previewLoading || templateBusy}
           >
-            {previewLoading ? "Previewing…" : "Preview Import"}
+            {previewLoading ? "Previewing…" : "Preview import"}
           </button>
         </div>
       </section>
@@ -529,15 +536,20 @@ export function AdminStudentImportPage() {
                   <ul className="confirm-message__list">
                     <li>
                       create{" "}
-                      {countLabel(preview.totalRows, "new PENDING account", "new PENDING accounts")}, and
+                      {countLabel(
+                        preview.totalRows,
+                        "new account awaiting registration",
+                        "new accounts awaiting registration"
+                      )}
+                      , and
                     </li>
                     <li>
                       leave them without a password until each student completes
                       registration, and
                     </li>
                     <li>
-                      import the whole batch together &mdash; either every row
-                      or none.
+                      import the whole batch together: either every row is
+                      imported, or none is.
                     </li>
                   </ul>
                   {confirmError !== null ? (
@@ -551,7 +563,7 @@ export function AdminStudentImportPage() {
                       disabled={confirming}
                       aria-busy={confirming}
                     >
-                      {confirming ? "Importing…" : "Confirm Import"}
+                      {confirming ? "Importing…" : "Confirm import"}
                     </button>
                   </div>
                 </div>
@@ -563,12 +575,12 @@ export function AdminStudentImportPage() {
 
       {result !== null ? (
         <section className="app-card" aria-labelledby="result-heading">
-          <h2 id="result-heading">Import Complete</h2>
+          <h2 id="result-heading">Import complete</h2>
           <div className="resource-success" role="status">
             <p>
               {countLabel(result.importedCount, "student", "students")} imported
-              successfully. Each new account is PENDING and must complete
-              registration before signing in.
+              successfully. Each new account must complete registration before
+              it can sign in.
             </p>
           </div>
           <div className="confirm-actions">
@@ -583,7 +595,7 @@ export function AdminStudentImportPage() {
               to="/app/admin/students"
               className="secondary-button"
             >
-              Return to Student Management
+              Return to student management
             </Link>
           </div>
         </section>

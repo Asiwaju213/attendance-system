@@ -143,8 +143,8 @@ export function StudentLoginPage() {
     return (
       <AuthShell
         title="Student Login"
-        eyebrow="Student Access"
-        description="Sign in to manage course registration, attendance, and device enrollment."
+        eyebrow="Student access"
+        description="Sign in to register for courses, mark attendance, and check your attendance history."
         subtitle="Checking your device…"
       >
         <div className="device-status-section__loading" role="status" aria-live="polite">
@@ -163,11 +163,13 @@ export function StudentLoginPage() {
   return (
     <AuthShell
       title="Student Login"
-      eyebrow="Student Access"
-      description="Sign in to manage course registration, attendance, and device enrollment."
-      subtitle={showDeviceBindingView
-        ? "Welcome back"
-        : "Sign in with your matric number and password."}
+      eyebrow="Student access"
+      description="Sign in to register for courses, mark attendance, and check your attendance history."
+      subtitle={
+        showDeviceBindingView
+          ? "Confirm your password to continue."
+          : "Enter your matric number and password."
+      }
       footer={<Link to="/register">New student? Register here</Link>}
     >
       {notice !== null ? (
@@ -215,8 +217,8 @@ export function StudentLoginPage() {
 
       {!showDeviceBindingView ? (
         <p className="device-enrollment-guidance device-enrollment-guidance--note">
-          If this is your first time signing in on a new phone, your password will take you to a
-          one-time passkey registration for this device.
+          On a new phone, your password takes you to a one-time passkey
+          registration for that device.
         </p>
       ) : null}
     </AuthShell>

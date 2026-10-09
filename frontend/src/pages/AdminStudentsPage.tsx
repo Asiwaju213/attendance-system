@@ -16,12 +16,19 @@ import type {
 } from "../types/studentAdmin";
 import { FormError } from "../components/FormError";
 import { ADMIN_LEVEL_OPTIONS } from "../lib/adminLevels";
+import { countLabel as formatCount, statusLabel } from "../lib/format";
 
 const STATUS_OPTIONS: readonly AdminStudentStatus[] = [
   "ACTIVE",
   "INACTIVE",
   "PENDING",
 ];
+
+const STUDENT_STATUS_LABELS: Record<AdminStudentStatus, string> = {
+  ACTIVE: "Active",
+  INACTIVE: "Inactive",
+  PENDING: "Pending",
+};
 
 interface StudentFilters {
   matricNumber: string;
@@ -143,20 +150,9 @@ function studentStatusClass(status: AdminStudentStatus): string {
 
 function deviceLabel(device: AdminStudentDetail["device"]): string {
   if (device === null || device === undefined) {
-    return "None";
+    return "No device";
   }
-  switch (device.status) {
-    case "ACTIVE":
-      return "Active";
-    case "REVOKED":
-      return "Revoked";
-    default:
-      return device.status;
-  }
-}
-
-function countLabel(count: number, singular: string, plural: string): string {
-  return count === 1 ? `1 ${singular}` : `${count} ${plural}`;
+  return statusLabel(device.status);
 }
 
 function statusActionLabel(student: AdminStudentListItem): string | null {
@@ -344,10 +340,9 @@ export function AdminStudentsPage() {
       <header className="app-header admin-page-header">
         <div>
           <p className="admin-page-header__eyebrow">Administration</p>
-          <h1>Student Management</h1>
+          <h1>Student management</h1>
           <p className="app-header__sub">
-            Search, view, deactivate, reactivate, and reset the registration of
-            student accounts.
+            Student accounts, their status, and their enrolled devices.
           </p>
         </div>
         <nav className="app-header__nav" aria-label="Admin navigation">
@@ -470,7 +465,7 @@ export function AdminStudentsPage() {
               <option value="">All statuses</option>
               {STATUS_OPTIONS.map((status) => (
                 <option key={status} value={status}>
-                  {status.charAt(0) + status.slice(1).toLowerCase()}
+                  {STUDENT_STATUS_LABELS[status]}
                 </option>
               ))}
             </select>
@@ -503,7 +498,7 @@ export function AdminStudentsPage() {
 
         {students !== null && students.length === 0 ? (
           <div className="admin-empty">
-            <p className="form-error admin-empty__message" role="status">
+            <p className="admin-empty__message" role="status">
               No students match the current filters.
             </p>
             <p className="inline-status">Try adjusting the filters, or clear them.</p>
@@ -513,7 +508,7 @@ export function AdminStudentsPage() {
         {students !== null && students.length > 0 ? (
           <>
             <p className="inline-status" role="status">
-              {countLabel(total, "student", "students")}
+              {formatCount(total, "student", "students")}
             </p>
             <div className="admin-table-scroll">
               <table className="admin-table">
@@ -553,11 +548,11 @@ export function AdminStudentsPage() {
                         <span
                           className={`student-status ${studentStatusClass(student.status)}`}
                         >
-                          {student.status}
+                          {STUDENT_STATUS_LABELS[student.status]}
                         </span>
                       </td>
                       <td>
-                        {countLabel(
+                        {formatCount(
                           student.registeredCourseCount,
                           "course",
                           "courses"
@@ -571,7 +566,7 @@ export function AdminStudentsPage() {
                               : "student-status student-status--none"
                           }
                         >
-                          {student.hasActiveDevice ? "Active" : "None"}
+                          {student.hasActiveDevice ? "Active" : "No device"}
                         </span>
                       </td>
                       <td>
@@ -635,7 +630,7 @@ export function AdminStudentsPage() {
                   Reset registration for {confirmAction.student.name}? This will:
                 </p>
                 <ul className="confirm-message__list">
-                  <li>return their account to PENDING,</li>
+                  <li>return their account to Pending registration,</li>
                   <li>clear their password so they cannot sign in,</li>
                   <li>require them to complete student registration again,</li>
                   <li>keep their enrolled-course history intact, and</li>
@@ -663,12 +658,12 @@ export function AdminStudentsPage() {
                 aria-busy={busyStudentId !== null}
               >
                 {busyStudentId === confirmAction.student.studentId
-                  ? "Working…"
+                  ? "Confirming…"
                   : confirmAction.kind === "RESET"
-                    ? "Confirm Reset"
+                    ? "Confirm reset"
                     : confirmAction.kind === "DEACTIVATE"
-                      ? "Confirm Deactivate"
-                      : "Confirm Reactivate"}
+                      ? "Confirm deactivate"
+                      : "Confirm reactivate"}
               </button>
               <button
                 type="button"
@@ -696,9 +691,12 @@ export function AdminStudentsPage() {
       </section>
 
       {openDetail !== null ? (
-        <section className="app-card app-card--wide" role="region" aria-label="Student details">
+        <section
+          className="app-card app-card--wide"
+          aria-labelledby="student-details-heading"
+        >
           <div className="admin-detail__header">
-            <h2>Student details</h2>
+            <h2 id="student-details-heading">Student details</h2>
             <button
               type="button"
               className="secondary-button"
@@ -747,12 +745,12 @@ export function AdminStudentsPage() {
               <p>
                 <strong>Status:</strong>{" "}
                 <span className={`student-status ${studentStatusClass(detail.status)}`}>
-                  {detail.status}
+                  {STUDENT_STATUS_LABELS[detail.status]}
                 </span>
               </p>
               <p>
                 <strong>Enrolled Courses:</strong>{" "}
-                {countLabel(detail.registeredCourseCount, "course", "courses")}
+                {formatCount(detail.registeredCourseCount, "course", "courses")}
               </p>
               <p>
                 <strong>Created:</strong> {formatDateTime(detail.createdAt)}
@@ -764,7 +762,7 @@ export function AdminStudentsPage() {
                 ) : (
                   <>
                     {deviceLabel(detail.device)} ·{" "}
-                    {countLabel(1, "device", "devices")} · Last seen{" "}
+                    {formatCount(1, "device", "devices")} · Last seen{" "}
                     {detail.device.lastSeenAt
                       ? formatDateTime(detail.device.lastSeenAt)
                       : "never"}
@@ -773,7 +771,7 @@ export function AdminStudentsPage() {
               </p>
               {detail.device !== null ? (
                 <div className="device-details">
-                  <p className="device-details__label">Device Summary</p>
+                  <h3 className="device-details__label">Device</h3>
                   <dl className="device-details__grid">
                     <dt>Label</dt>
                     <dd>{detail.device.label ?? "Unlabeled"}</dd>

@@ -46,7 +46,7 @@ async function openAdminAttendancePage(page: Page): Promise<void> {
   await loginAsAdmin(page);
   await page.goto("/app/admin/attendance");
   await expect(
-    page.getByRole("heading", { level: 1, name: "Attendance Monitoring" })
+    page.getByRole("heading", { level: 1, name: "Attendance monitoring" })
   ).toBeVisible();
 }
 
@@ -133,7 +133,7 @@ test("an unauthenticated user is redirected to the admin login page", async ({
 
   await expect(page).toHaveURL(/\/staff\/admin\/login$/);
   await expect(
-    page.getByRole("heading", { level: 1, name: "Admin Login" })
+    page.getByRole("heading", { level: 1, name: "Administrator Login" })
   ).toBeVisible();
 });
 
@@ -155,11 +155,11 @@ test("an admin can navigate to Attendance Monitoring and see sessions from the b
 }) => {
   await loginAsAdmin(page);
 
-  await page.getByRole("link", { name: "Attendance Monitoring" }).click();
+  await page.getByRole("link", { name: "Attendance monitoring" }).click();
 
   await expect(page).toHaveURL(/\/app\/admin\/attendance$/);
   await expect(
-    page.getByRole("heading", { level: 1, name: "Attendance Monitoring" })
+    page.getByRole("heading", { level: 1, name: "Attendance monitoring" })
   ).toBeVisible();
   await expect(page.getByText(MONITOR_NAME, { exact: false }).first()).toBeVisible();
   await expect(
@@ -271,14 +271,14 @@ test("clicking a session opens its details fetched from the backend", async ({
   await openSessionDetails(page, 0);
 
   const detailSection = await getDetailSection(page);
-  await expect(detailSection.getByText("E2E-101 — E2E Computer Science 101")).toBeVisible();
+  await expect(detailSection.getByText("E2E-101 · E2E Computer Science 101")).toBeVisible();
   await expect(
     detailSection.getByText(`${MONITOR_NAME} (${MONITOR_STAFF_ID})`)
   ).toBeVisible();
-  await expect(detailSection.getByText("E2E-NET-001 — E2E Test Network")).toBeVisible();
+  await expect(detailSection.getByText("E2E-NET-001 · E2E Test Network")).toBeVisible();
   await expect(detailSection.getByText("E2E Test Lecture Hall")).toBeVisible();
   await expect(detailSection.getByText("E2E-2026/2027 · First Semester")).toBeVisible();
-  await expect(detailSection.locator(".session-status--active")).toContainText("ACTIVE");
+  await expect(detailSection.locator(".session-status--active")).toContainText("Active");
   await expect(detailSection.getByText("Created at:", { exact: false })).toBeVisible();
 });
 
@@ -293,13 +293,13 @@ test("the detail view for an active session shows attendance records with correc
 
   const detailSection = await getDetailSection(page);
 
-  await expect(detailSection.locator(".session-status--active")).toContainText("ACTIVE");
+  await expect(detailSection.locator(".session-status--active")).toContainText("Active");
 
   const recordsTable = await getRecordsTable(page);
   await expect(recordsTable).toBeVisible();
 
   await expect(recordsTable.getByRole("columnheader", { name: "Student" })).toBeVisible();
-  await expect(recordsTable.getByRole("columnheader", { name: "Matric No." })).toBeVisible();
+  await expect(recordsTable.getByRole("columnheader", { name: "Matric Number" })).toBeVisible();
   await expect(recordsTable.getByRole("columnheader", { name: "Status" })).toBeVisible();
   await expect(recordsTable.getByRole("columnheader", { name: "Marked At" })).toBeVisible();
   await expect(recordsTable.getByRole("columnheader", { name: "Correction" })).toBeVisible();
@@ -307,8 +307,8 @@ test("the detail view for an active session shows attendance records with correc
   const recordRows = recordsTable.locator(".admin-table__row");
   await expect(recordRows).toHaveCount(1);
 
-  await expect(recordRows.first().getByRole("button", { name: "PRESENT" })).toBeVisible();
-  await expect(recordRows.first().getByRole("button", { name: "LATE" })).toBeVisible();
+  await expect(recordRows.first().getByRole("button", { name: "Present" })).toBeVisible();
+  await expect(recordRows.first().getByRole("button", { name: "Late" })).toBeVisible();
 });
 
 test("the detail view for an ended session shows attendance records with correction controls", async ({
@@ -322,7 +322,7 @@ test("the detail view for an ended session shows attendance records with correct
 
   const detailSection = await getDetailSection(page);
 
-  await expect(detailSection.locator(".session-status--ended")).toContainText("ENDED");
+  await expect(detailSection.locator(".session-status--ended")).toContainText("Ended");
 
   const recordsTable = await getRecordsTable(page);
   await expect(recordsTable).toBeVisible();
@@ -330,8 +330,8 @@ test("the detail view for an ended session shows attendance records with correct
   const recordRows = recordsTable.locator(".admin-table__row");
   await expect(recordRows).toHaveCount(1);
 
-  await expect(recordRows.first().getByRole("button", { name: "PRESENT" })).toBeVisible();
-  await expect(recordRows.first().getByRole("button", { name: "LATE" })).toBeVisible();
+  await expect(recordRows.first().getByRole("button", { name: "Present" })).toBeVisible();
+  await expect(recordRows.first().getByRole("button", { name: "Late" })).toBeVisible();
 });
 
 test("admin can correct LATE to PRESENT and sees updated status", async ({
@@ -348,10 +348,10 @@ test("admin can correct LATE to PRESENT and sees updated status", async ({
 
   // The active session has LATE status (seeded as LATE)
   const initialStatus = await firstRecord.locator(".attendance-state").textContent();
-  expect(initialStatus?.trim()).toBe("LATE");
+  expect(initialStatus?.trim()).toBe("Late");
 
-  const targetStatus = "PRESENT";
-  const otherStatus = "LATE";
+  const targetStatus = "Present";
+  const otherStatus = "Late";
 
   await firstRecord.getByRole("button", { name: targetStatus }).click();
 
@@ -359,7 +359,7 @@ test("admin can correct LATE to PRESENT and sees updated status", async ({
   await expect(confirmDialog).toBeVisible();
   await expect(confirmDialog.getByText(new RegExp(targetStatus))).toBeVisible();
 
-  await confirmDialog.getByRole("button", { name: "Confirm" }).click();
+  await confirmDialog.getByRole("button", { name: "Confirm correction" }).click();
 
   await expect(confirmDialog).toBeHidden();
 
@@ -384,10 +384,10 @@ test("admin can correct PRESENT to LATE and sees updated status", async ({
   const firstRecord = recordsTable.locator(".admin-table__row").first();
 
   const initialStatus = await firstRecord.locator(".attendance-state").textContent();
-  expect(initialStatus?.trim()).toBe("PRESENT");
+  expect(initialStatus?.trim()).toBe("Present");
 
-  const targetStatus = "LATE";
-  const otherStatus = "PRESENT";
+  const targetStatus = "Late";
+  const otherStatus = "Present";
 
   await firstRecord.getByRole("button", { name: targetStatus }).click();
 
@@ -395,7 +395,7 @@ test("admin can correct PRESENT to LATE and sees updated status", async ({
   await expect(confirmDialog).toBeVisible();
   await expect(confirmDialog.getByText(new RegExp(targetStatus))).toBeVisible();
 
-  await confirmDialog.getByRole("button", { name: "Confirm" }).click();
+  await confirmDialog.getByRole("button", { name: "Confirm correction" }).click();
 
   await expect(confirmDialog).toBeHidden();
 
@@ -417,7 +417,7 @@ test("confirmation is required before submitting a correction", async ({
 
   const firstRecord = (await getRecordsTable(page)).locator(".admin-table__row").first();
 
-  await firstRecord.getByRole("button", { name: "LATE" }).click();
+  await firstRecord.getByRole("button", { name: "Late" }).click();
 
   const confirmDialog = firstRecord.locator(".correction-confirm");
   await expect(confirmDialog).toBeVisible();
@@ -444,13 +444,13 @@ test("duplicate submission is prevented while loading", async ({
   const firstRecord = (await getRecordsTable(page)).locator(".admin-table__row").first();
 
   // The ended session has LATE status, so we correct to PRESENT
-  await expect(firstRecord.getByRole("button", { name: "PRESENT" })).toBeEnabled({ timeout: 15_000 });
-  await firstRecord.getByRole("button", { name: "PRESENT" }).click();
+  await expect(firstRecord.getByRole("button", { name: "Present" })).toBeEnabled({ timeout: 15_000 });
+  await firstRecord.getByRole("button", { name: "Present" }).click();
 
   const confirmDialog = firstRecord.locator(".correction-confirm");
   await expect(confirmDialog).toBeVisible();
 
-  const confirmButton = confirmDialog.getByRole("button", { name: "Confirm" });
+  const confirmButton = confirmDialog.getByRole("button", { name: "Confirm correction" });
   await confirmButton.click();
 
   // Wait for the correction to complete (dialog closes)
@@ -458,11 +458,11 @@ test("duplicate submission is prevented while loading", async ({
 
   // Verify the correction was applied (status changed)
   const updatedStatus = await firstRecord.locator(".attendance-state").textContent();
-  expect(updatedStatus?.trim()).toBe("PRESENT");
+  expect(updatedStatus?.trim()).toBe("Present");
 
   // The same correction button should now be disabled (status already matches)
-  await expect(firstRecord.getByRole("button", { name: "PRESENT" })).toBeDisabled();
-  await expect(firstRecord.getByRole("button", { name: "LATE" })).toBeVisible();
+  await expect(firstRecord.getByRole("button", { name: "Present" })).toBeDisabled();
+  await expect(firstRecord.getByRole("button", { name: "Late" })).toBeVisible();
 });
 
 test("NO_OP_CORRECTION displays appropriate message", async ({
@@ -477,7 +477,7 @@ test("NO_OP_CORRECTION displays appropriate message", async ({
   const firstRecord = (await getRecordsTable(page)).locator(".admin-table__row").first();
 
   const initialStatus = await firstRecord.locator(".attendance-state").textContent();
-  expect(initialStatus?.trim()).toMatch(/PRESENT|LATE/);
+  expect(initialStatus?.trim()).toMatch(/Present|Late/);
 
   // The UI disables the same-status button, so we mock the backend 409
   // response to exercise the error-display path.  The real NO_OP_CORRECTION
@@ -493,13 +493,13 @@ test("NO_OP_CORRECTION displays appropriate message", async ({
     })
   );
 
-  const otherStatus = initialStatus?.trim() === "PRESENT" ? "LATE" : "PRESENT";
+  const otherStatus = initialStatus?.trim() === "Present" ? "Late" : "Present";
   await firstRecord.getByRole("button", { name: otherStatus }).click();
 
   const confirmDialog = firstRecord.locator(".correction-confirm");
   await expect(confirmDialog).toBeVisible();
 
-  await confirmDialog.getByRole("button", { name: "Confirm" }).click();
+  await confirmDialog.getByRole("button", { name: "Confirm correction" }).click();
 
   await expect(
     confirmDialog.getByText(/already has that status|NO_OP_CORRECTION/i)
@@ -523,12 +523,12 @@ test("backend error displays appropriate message", async ({
     route.fulfill({ status: 500, body: JSON.stringify({ error: "INTERNAL_ERROR" }) })
   );
 
-  await firstRecord.getByRole("button", { name: "LATE" }).click();
+  await firstRecord.getByRole("button", { name: "Late" }).click();
 
   const confirmDialog = firstRecord.locator(".correction-confirm");
   await expect(confirmDialog).toBeVisible();
 
-  await confirmDialog.getByRole("button", { name: "Confirm" }).click();
+  await confirmDialog.getByRole("button", { name: "Confirm correction" }).click();
 
   await expect(
     confirmDialog.getByText(/Something went wrong|INTERNAL_ERROR/i)
@@ -549,7 +549,7 @@ test("back to sessions closes the detail panel and returns to the list", async (
   ).toBeVisible();
 
   await page
-    .getByRole("button", { name: "Back to sessions" })
+    .getByRole("button", { name: "Close details" })
     .click();
 
   await expect(

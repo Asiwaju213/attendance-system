@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { LoadingPage } from "../components/LoadingPage";
 import { useAuth } from "../app/useAuth";
+import { statusLabel } from "../lib/format";
 
 function greetingForLocalTime(): string {
   const hour = new Date().getHours();
@@ -49,7 +50,7 @@ export function StudentHomePage() {
         </h2>
         <p className="student-detail">
           <span className="student-detail__label">Role: </span>
-          {user.role}
+          {statusLabel(user.role)}
         </p>
         <p className="student-detail">
           <span className="student-detail__label">Matric Number: </span>
@@ -62,8 +63,7 @@ export function StudentHomePage() {
         aria-labelledby="student-action-heading"
       >
         <div className="student-section-heading">
-          <p>Quick access</p>
-          <h2 id="student-action-heading">What would you like to do?</h2>
+          <h2 id="student-action-heading">Attendance and courses</h2>
         </div>
 
         <div className="student-actions">
@@ -155,7 +155,7 @@ export function StudentHomePage() {
                   <line x1="12" y1="18" x2="12.01" y2="18" />
                 </svg>
               </span>
-              <span>Device Enrollment</span>
+              <span>Device enrollment</span>
             </Link>
           </div>
         </div>
@@ -169,7 +169,7 @@ export function StudentHomePage() {
           disabled={isLoggingOut}
           aria-busy={isLoggingOut}
         >
-          {isLoggingOut ? "Logging out…" : "Log out"}
+          {isLoggingOut ? "Signing out…" : "Sign out"}
         </button>
       </div>
     </main>

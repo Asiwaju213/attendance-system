@@ -7,10 +7,10 @@ import {
   listCourseOfferings,
 } from "../api/attendance";
 import { downloadLecturerSemesterAttendanceReport } from "../lib/lecturerAttendanceExcel";
+import { formatPercentage, statusLabel } from "../lib/format";
 import type {
   LecturerAttendanceReport,
   LecturerCourseOffering,
-  LecturerReportAttendanceStatus,
 } from "../types/attendance";
 
 interface Option {
@@ -48,21 +48,6 @@ function formatTimeOnly(value: string): string {
     hour: "2-digit",
     minute: "2-digit",
   });
-}
-
-function formatPercentage(value: number | null): string {
-  return value === null ? "—" : `${value.toFixed(2)}%`;
-}
-
-function statusLabel(status: LecturerReportAttendanceStatus): string {
-  switch (status) {
-    case "PRESENT":
-      return "Present";
-    case "LATE":
-      return "Late";
-    case "ABSENT":
-      return "Absent";
-  }
 }
 
 export function LecturerAttendanceReportsPage() {
@@ -213,7 +198,7 @@ export function LecturerAttendanceReportsPage() {
       (offerings ?? [])
         .map((offering) => ({
           value: String(offering.id),
-          label: `${offering.courseCode} — ${offering.courseTitle} · ${offering.academicSessionName} · ${offering.semesterName}`,
+          label: `${offering.courseCode} · ${offering.courseTitle} · ${offering.academicSessionName} · ${offering.semesterName}`,
         }))
         .sort((a, b) => a.label.localeCompare(b.label)),
     [offerings]
@@ -232,13 +217,13 @@ export function LecturerAttendanceReportsPage() {
     <main className="app-page lecturer-reports-page">
       <header className="app-header lecturer-reports-header">
         <div className="lecturer-reports-header__copy">
-          <p className="lecturer-reports-header__eyebrow">Lecturer records</p>
-          <h1>Attendance Reports</h1>
+          <p className="lecturer-reports-header__eyebrow">Lecturer attendance</p>
+          <h1>Attendance reports</h1>
           <p className="app-header__sub">
-            Attendance summaries for your course offerings.
+            Totals and session records for a course offering you teach.
           </p>
         </div>
-        <nav className="app-header__nav">
+        <nav className="app-header__nav" aria-label="Lecturer navigation">
           <Link to="/app/lecturer">Back to Lecturer Home</Link>
         </nav>
       </header>
@@ -286,11 +271,14 @@ export function LecturerAttendanceReportsPage() {
 
       <section
         className="app-card app-card--wide lecturer-report-workspace"
-        aria-label="Attendance report"
+        aria-labelledby="attendance-report-heading"
       >
+        <div className="admin-detail__header">
+          <h2 id="attendance-report-heading">Attendance report</h2>
+        </div>
         {selectedId === null ? (
           <div className="admin-empty">
-            <p className="form-error admin-empty__message" role="status">
+            <p className="admin-empty__message" role="status">
               Select a course offering to view its attendance report.
             </p>
             <p className="inline-status">
@@ -320,7 +308,7 @@ export function LecturerAttendanceReportsPage() {
              <div className="session-detail admin-detail lecturer-report-context">
               <p>
                 <span className="app-detail__label">Course: </span>
-                {context.courseCode} — {context.courseTitle}
+                {context.courseCode} · {context.courseTitle}
               </p>
               <p>
                 <span className="app-detail__label">Academic session: </span>
@@ -371,7 +359,7 @@ export function LecturerAttendanceReportsPage() {
 
             {noEnrolledStudents ? (
               <div className="admin-empty">
-                <p className="form-error admin-empty__message" role="status">
+                <p className="admin-empty__message" role="status">
                   No students are enrolled in this course offering.
                 </p>
               </div>
@@ -388,7 +376,7 @@ export function LecturerAttendanceReportsPage() {
                     <thead>
                       <tr>
                         <th scope="col">Student</th>
-                        <th scope="col">Matric No.</th>
+                        <th scope="col">Matric Number</th>
                         <th scope="col">Sessions</th>
                         <th scope="col">Present</th>
                         <th scope="col">Late</th>
@@ -404,7 +392,7 @@ export function LecturerAttendanceReportsPage() {
                               {student.studentName}
                             </span>
                           </td>
-                          <td data-label="Matric No.">{student.matricNumber}</td>
+                          <td data-label="Matric Number">{student.matricNumber}</td>
                           <td data-label="Sessions">{student.totalCompletedSessions}</td>
                           <td data-label="Present">{student.presentCount}</td>
                           <td data-label="Late">{student.lateCount}</td>
@@ -453,7 +441,7 @@ export function LecturerAttendanceReportsPage() {
                           >
                             <div className="history-session__header">
                               <p className="session-list__title">
-                                {formatDateTime(session.startTime)} –{" "}
+                                {formatDateTime(session.startTime)} to{" "}
                                 {formatTimeOnly(session.endTime)}
                               </p>
                               <span

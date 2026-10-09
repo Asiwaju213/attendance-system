@@ -38,7 +38,7 @@ test("successful student login reaches the authenticated state", async ({
   await loginAsStudent(page);
 
   await expect(page.getByText(E2E_STUDENT.name)).toBeVisible();
-  await expect(page.getByText("Role: STUDENT")).toBeVisible();
+  await expect(page.getByText("Role: Student")).toBeVisible();
   await expect(page.getByText(E2E_STUDENT.matricNumber)).toBeVisible();
 });
 
@@ -48,7 +48,7 @@ test("successful lecturer login reaches the authenticated state", async ({
   await loginAsLecturer(page);
 
   await expect(page.getByText(E2E_LECTURER.name)).toBeVisible();
-  await expect(page.getByText("Role: LECTURER")).toBeVisible();
+  await expect(page.getByText("Role: Lecturer")).toBeVisible();
   await expect(page.getByText(E2E_LECTURER.staffId)).toBeVisible();
 });
 
@@ -58,7 +58,7 @@ test("successful admin login reaches the authenticated state", async ({
   await loginAsAdmin(page);
 
   await expect(page.getByText(E2E_ADMIN.name)).toBeVisible();
-  await expect(page.getByText("Role: ADMIN")).toBeVisible();
+  await expect(page.getByText("Role: Administrator")).toBeVisible();
   await expect(page.getByText(E2E_ADMIN.username)).toBeVisible();
 });
 
@@ -77,7 +77,7 @@ test("invalid credentials show a generic error and stay on the login page", asyn
 test("logging out returns to the unauthenticated state", async ({ page }) => {
   await loginAsStudent(page);
 
-  await page.getByRole("button", { name: "Log out" }).click();
+  await page.getByRole("button", { name: "Sign out" }).click();
 
   await expect(page).toHaveURL(/\/login$/);
   await expect(

@@ -46,7 +46,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
    * Only the `authenticated` outcome establishes a session here. The backend deliberately refuses
    * to mint one from a matric number and password alone, so the other two outcomes (a
    * first-device enrollment grant, or a refusal because another device is already enrolled) must
-   * leave the auth state untouched — calling `applySession` for those would tell the app the
+   * leave the auth state untouched: calling `applySession` for those would tell the app the
    * student is signed in when no `oou_session` exists.
    */
   const loginStudent = useCallback(

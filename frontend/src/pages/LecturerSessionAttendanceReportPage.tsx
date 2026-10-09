@@ -6,10 +6,8 @@ import { getLecturerSessionAttendanceReport } from "../api/attendance";
 import {
   downloadLecturerSessionAttendanceReport,
 } from "../lib/lecturerAttendanceExcel";
-import type {
-  LecturerReportAttendanceStatus,
-  LecturerSessionAttendanceReport,
-} from "../types/attendance";
+import { NOT_AVAILABLE, statusLabel } from "../lib/format";
+import type { LecturerSessionAttendanceReport } from "../types/attendance";
 
 function sessionReportErrorMessage(error: unknown): string {
   if (error instanceof ApiError) {
@@ -36,16 +34,7 @@ function formatDateTime(value: string): string {
   });
 }
 
-function statusLabel(status: LecturerReportAttendanceStatus): string {
-  switch (status) {
-    case "PRESENT":
-      return "Present";
-    case "LATE":
-      return "Late";
-    case "ABSENT":
-      return "Absent";
-  }
-}
+
 
 function parseSessionIdParam(value: string | undefined): number | null {
   if (value === undefined || !/^\d+$/.test(value)) {
@@ -161,15 +150,19 @@ export function LecturerSessionAttendanceReportPage() {
       <main className="app-page lecturer-reports-page">
         <header className="app-header lecturer-reports-header">
           <div className="lecturer-reports-header__copy">
-            <p className="lecturer-reports-header__eyebrow">Lecturer records</p>
-            <h1>Session Attendance Report</h1>
+            <p className="lecturer-reports-header__eyebrow">Lecturer attendance</p>
+            <h1>Session attendance report</h1>
           </div>
-          <nav className="app-header__nav">
+          <nav className="app-header__nav" aria-label="Lecturer navigation">
             <Link to="/app/lecturer/attendance">Back to attendance sessions</Link>
           </nav>
         </header>
-        <section className="app-card app-card--wide lecturer-report-workspace">
+        <section
+          className="app-card app-card--wide lecturer-report-workspace"
+          aria-labelledby="session-report-error-heading"
+        >
           <div className="resource-error">
+            <h2 id="session-report-error-heading">Report unavailable</h2>
             <p role="alert" className="form-error">
               The attendance session could not be found.
             </p>
@@ -193,21 +186,24 @@ export function LecturerSessionAttendanceReportPage() {
     <main className="app-page lecturer-reports-page">
       <header className="app-header lecturer-reports-header">
         <div className="lecturer-reports-header__copy">
-          <p className="lecturer-reports-header__eyebrow">Lecturer records</p>
-          <h1>Session Attendance Report</h1>
+          <p className="lecturer-reports-header__eyebrow">Lecturer attendance</p>
+          <h1>Session attendance report</h1>
           <p className="app-header__sub">
-            Attendance for a single completed session.
+            Attendance for one completed session.
           </p>
         </div>
-        <nav className="app-header__nav">
+        <nav className="app-header__nav" aria-label="Lecturer navigation">
           <Link to="/app/lecturer/attendance">Back to attendance sessions</Link>
         </nav>
       </header>
 
       <section
         className="app-card app-card--wide lecturer-report-workspace"
-        aria-label="Session attendance report"
+        aria-labelledby="session-report-heading"
       >
+        <div className="admin-detail__header">
+          <h2 id="session-report-heading">Session attendance report</h2>
+        </div>
         {reportError !== null ? (
           <div className="resource-error">
             <p role="alert" className="form-error">
@@ -230,7 +226,7 @@ export function LecturerSessionAttendanceReportPage() {
             <div className="session-detail admin-detail lecturer-report-context">
               <p>
                 <span className="app-detail__label">Course: </span>
-                {session.courseCode} — {session.courseTitle}
+                {session.courseCode} · {session.courseTitle}
               </p>
               <p>
                 <span className="app-detail__label">Academic session: </span>
@@ -251,7 +247,10 @@ export function LecturerSessionAttendanceReportPage() {
               </p>
               <p>
                 <span className="app-detail__label">Ended: </span>
-                {formatDateTime(session.endTime)} · Late threshold{" "}
+                {formatDateTime(session.endTime)}
+              </p>
+              <p>
+                <span className="app-detail__label">Late threshold: </span>
                 {session.lateThresholdMinutes} minutes
               </p>
             </div>
@@ -284,8 +283,8 @@ export function LecturerSessionAttendanceReportPage() {
 
             {students.length === 0 ? (
               <div className="admin-empty">
-                <p className="form-error admin-empty__message" role="status">
-                  No students are enrolled in this course offering.
+                <p className="admin-empty__message" role="status">
+                  No attendance was recorded for this session.
                 </p>
               </div>
             ) : (
@@ -294,7 +293,7 @@ export function LecturerSessionAttendanceReportPage() {
                   <thead>
                     <tr>
                       <th scope="col">Student</th>
-                      <th scope="col">Matric No.</th>
+                      <th scope="col">Matric Number</th>
                       <th scope="col">Status</th>
                       <th scope="col">Marked At</th>
                     </tr>
@@ -307,7 +306,7 @@ export function LecturerSessionAttendanceReportPage() {
                             {student.studentName}
                           </span>
                         </td>
-                        <td data-label="Matric No.">{student.matricNumber}</td>
+                        <td data-label="Matric Number">{student.matricNumber}</td>
                         <td data-label="Status">
                           <span
                             className={`history-status history-status--${student.status.toLowerCase()}`}
@@ -318,7 +317,7 @@ export function LecturerSessionAttendanceReportPage() {
                         <td data-label="Marked At">
                           {student.markedAt !== null
                             ? formatDateTime(student.markedAt)
-                            : "—"}
+                            : NOT_AVAILABLE}
                         </td>
                       </tr>
                     ))}

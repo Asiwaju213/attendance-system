@@ -111,8 +111,8 @@ export function LecturerChangePasswordPage() {
     <AuthShell
       title="Change your password"
       eyebrow="First sign-in"
-      description="Your attendance workspace is available once your temporary password has been replaced."
-      subtitle="Choose a new password for your staff account. You will sign in with it from now on."
+      description="Your account is limited to this page until you replace the temporary password."
+      subtitle="Choose a password you will use from now on."
       footer={
         <button
           type="button"
@@ -120,7 +120,7 @@ export function LecturerChangePasswordPage() {
           onClick={handleSignOut}
           disabled={isSubmitting || isSigningOut}
         >
-          {isSigningOut ? "Signing out…" : "Sign out instead"}
+          {isSigningOut ? "Signing out…" : "Sign out"}
         </button>
       }
     >
@@ -162,7 +162,7 @@ export function LecturerChangePasswordPage() {
           {isSubmitting ? "Saving…" : "Change password"}
         </button>
         <p className="note">
-          Your account stays limited to this page until the password is changed.
+          Choose a password you have not used before. You will sign in with it from now on.
         </p>
       </form>
     </AuthShell>

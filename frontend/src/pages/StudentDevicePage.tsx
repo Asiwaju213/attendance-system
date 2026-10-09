@@ -253,11 +253,11 @@ function StudentDevicePageBody({ enrollmentOnly }: { enrollmentOnly: boolean }) 
       <header className="app-header device-enrollment-header">
         <div className="device-enrollment-header__copy">
           <p className="device-enrollment-header__eyebrow">Student security</p>
-          <h1>Device Enrollment</h1>
+          <h1>Device enrollment</h1>
           <p className="app-header__sub">
             {enrollmentOnly
-              ? "Register this device to finish signing in. Your account password was accepted, but a passkey must be registered on this phone before you can use the app."
-              : "Register a WebAuthn authenticator (passkey) to enable secure attendance marking."}
+              ? "Register this device to finish signing in. A passkey must be registered on this phone before you can use the system."
+              : "Register a passkey so you can mark attendance securely on this device."}
           </p>
         </div>
         <nav className="app-header__nav" aria-label="Student navigation">
@@ -275,7 +275,7 @@ function StudentDevicePageBody({ enrollmentOnly }: { enrollmentOnly: boolean }) 
                 disabled={isLoggingOut}
                 aria-busy={isLoggingOut}
               >
-                {isLoggingOut ? "Logging out…" : "Log out"}
+                {isLoggingOut ? "Signing out…" : "Sign out"}
               </button>
             </>
           )}
@@ -304,11 +304,11 @@ function StudentDevicePageBody({ enrollmentOnly }: { enrollmentOnly: boolean }) 
           <div className="device-status-card device-status-card--unenrolled">
             <div className="device-status-card__status">
               <span className="device-status-badge device-status-badge--none">
-                Status Unavailable
+                Status unavailable
               </span>
             </div>
             <p className="device-status-card__description">
-              We could not load your device status. Reload the page to try again.
+              The device status could not be loaded. Reload the page to try again.
             </p>
           </div>
         ) : null}
@@ -317,13 +317,13 @@ function StudentDevicePageBody({ enrollmentOnly }: { enrollmentOnly: boolean }) 
           <div className="device-status-card device-status-card--unenrolled">
             <div className="device-status-card__status">
               <span className="device-status-badge device-status-badge--none">
-                No Active Device
+                No active device
               </span>
             </div>
             <p className="device-status-card__description">
               {showRetryUpgrade
-                ? "Your device was registered, but the credential it created is not currently discoverable, so it cannot be used for device-based student login. Your device still works for attendance."
-                : "You have not registered a device on this account yet. Register one to mark attendance."}
+                ? "The passkey was created but cannot be used to sign in on this device. It still works for marking attendance."
+                : "No device is registered on this account yet. Register one to mark attendance."}
             </p>
           </div>
         ) : null}
@@ -352,14 +352,14 @@ function StudentDevicePageBody({ enrollmentOnly }: { enrollmentOnly: boolean }) 
               </div>
             ) : null}
             <p className="device-status-card__description">
-              Your current device is still valid for attendance. It needs to be upgraded before
-              it can be used for device-based student login, because it was registered before
-              that sign-in method became available.
+              This device is still valid for attendance. Upgrade it before using
+              it to sign in, because it was registered before that sign-in method
+              became available.
             </p>
             <p className="device-status-card__note">
-              Upgrading creates a new passkey on this device. Your existing credential is
-              replaced only after the new one is registered successfully, so attendance is never
-              interrupted.
+              Upgrading creates a new passkey on this device. Your existing
+              credential is replaced only after the new one is registered
+              successfully, so attendance is never interrupted.
             </p>
           </div>
         ) : null}
@@ -388,8 +388,8 @@ function StudentDevicePageBody({ enrollmentOnly }: { enrollmentOnly: boolean }) 
               </div>
             ) : null}
             <p className="device-status-card__note">
-              This device is registered and is ready for device-based student login once that
-              sign-in option is available. No further action is needed.
+              This device is registered. No further action is needed unless you
+              need to sign in on this device, which is not available yet.
             </p>
           </div>
         ) : null}
@@ -406,14 +406,14 @@ function StudentDevicePageBody({ enrollmentOnly }: { enrollmentOnly: boolean }) 
               <div className="device-enrollment-form">
                 <div className="field">
                   <label htmlFor="device-label" className="field__label">
-                    Device Label (optional)
+                    Device label (optional)
                   </label>
                   <input
                     id="device-label"
                     className="field__input"
                     type="text"
                     maxLength={100}
-                    placeholder="e.g., Personal iPhone, Work Laptop"
+                    placeholder="e.g. Personal iPhone, work laptop"
                     value={deviceLabel}
                     onChange={(e) => setDeviceLabel(e.target.value)}
                     disabled={isEnrolling}
@@ -430,19 +430,18 @@ function StudentDevicePageBody({ enrollmentOnly }: { enrollmentOnly: boolean }) 
                   {isEnrolling
                     ? "Registering…"
                     : showRetryUpgrade
-                      ? "Try Device Upgrade Again"
+                      ? "Try device upgrade again"
                       : showUpgrade
-                        ? "Upgrade This Device"
-                        : "Register This Device"}
+                        ? "Upgrade this device"
+                        : "Register this device"}
                 </button>
               </div>
             ) : null}
 
             {showEnroll || showUpgrade || showRetryUpgrade ? (
               <p className="device-enrollment-guidance device-enrollment-guidance--note">
-                Your browser or device will prompt you to verify using your enrolled
-                authenticator (Windows Hello, Touch ID, Face ID, security key, etc.). This
-                verification happens locally on your device.
+                Your browser will ask you to verify with Windows Hello, Touch ID,
+                Face ID, or a security key. Verification happens on this device.
               </p>
             ) : null}
           </>
@@ -453,7 +452,7 @@ function StudentDevicePageBody({ enrollmentOnly }: { enrollmentOnly: boolean }) 
         <section className="device-enrollment-pending" aria-live="polite" aria-busy="true">
           <div className="device-enrollment-pending__spinner" aria-hidden="true" />
           <p className="device-enrollment-pending__message">
-            Verifying your device… Please complete the verification on your device.
+            Verifying your device… complete the verification on your device.
           </p>
         </section>
       )}

@@ -13,6 +13,7 @@ import { listAcademicSessions, listSemesters } from "../api/academicPeriods";
 import { ApiError } from "../api/client";
 import { listAdminCourseOfferings } from "../api/attendance";
 import { FormError } from "../components/FormError";
+import { statusLabel } from "../lib/format";
 import type { AdminCourse, AdminAssignedLecturer } from "../types/adminCourse";
 import type { AdminLecturer } from "../types/adminLecturer";
 import type { AcademicSession, Semester } from "../types/academicPeriod";
@@ -111,7 +112,7 @@ function offeringStatusClass(status: OfferingStatus): string {
   return status === "OPEN" ? "student-status--active" : "student-status--inactive";
 }
 
-function countLabel(count: number): string {
+function offeringsCountLabel(count: number): string {
   return count === 1 ? "1 offering" : `${count} offerings`;
 }
 
@@ -337,14 +338,24 @@ export function AdminCourseOfferingsPage() {
     (lecturer) => !assignedIds.has(lecturer.id)
   );
 
+  // The assigned-lecturer rows carry only a department id, so resolve the name
+  // from the lecturer list this page already loaded rather than showing a bare
+  // number to the administrator.
+  function departmentNameFor(departmentId: number): string {
+    return (
+      lecturers.find((lecturer) => lecturer.departmentId === departmentId)
+        ?.departmentName ?? "Not available"
+    );
+  }
+
   return (
     <main className="app-page admin-page">
       <header className="app-header admin-page-header">
         <div>
           <p className="admin-page-header__eyebrow">Administration</p>
-          <h1>Course Offerings</h1>
+          <h1>Course offerings</h1>
           <p className="app-header__sub">
-            Create course offerings, assign lecturers, and open a course roster.
+            Schedule a course for a session and semester, and assign its lecturers.
           </p>
         </div>
         <nav className="app-header__nav" aria-label="Admin navigation">
@@ -369,7 +380,7 @@ export function AdminCourseOfferingsPage() {
 
       {offerings !== null && offerings.length === 0 ? (
         <div className="admin-empty">
-          <p className="form-error admin-empty__message" role="status">
+          <p className="admin-empty__message" role="status">
             No course offerings found.
           </p>
           <p className="inline-status">
@@ -381,7 +392,7 @@ export function AdminCourseOfferingsPage() {
       {offerings !== null && offerings.length > 0 ? (
         <>
           <p className="inline-status" role="status">
-            {countLabel(total)}
+            {offeringsCountLabel(total)}
           </p>
           <div className="admin-table-scroll">
             <table className="admin-table">
@@ -414,7 +425,7 @@ export function AdminCourseOfferingsPage() {
                         <span
                           className={`student-status ${offeringStatusClass(offering.status)}`}
                         >
-                          {offering.status}
+                          {statusLabel(offering.status)}
                         </span>
                       </td>
                       <td>
@@ -445,7 +456,7 @@ export function AdminCourseOfferingsPage() {
                             className="app-card"
                             aria-label={`Lecturers for ${offering.courseCode}`}
                           >
-                            <h3>Lecturers — {offering.courseCode}</h3>
+                            <h3>Lecturers for {offering.courseCode}</h3>
 
                             {assigned === null && assignedError === null ? (
                               <p className="inline-status" role="status">
@@ -473,7 +484,7 @@ export function AdminCourseOfferingsPage() {
                                 {assigned.length === 0 ? (
                                   <div className="admin-empty">
                                     <p
-                                      className="form-error admin-empty__message"
+                                      className="admin-empty__message"
                                       role="status"
                                     >
                                       No lecturers assigned yet.
@@ -506,7 +517,9 @@ export function AdminCourseOfferingsPage() {
                                                 {lecturer.staffId}
                                               </span>
                                             </td>
-                                            <td>{lecturer.departmentId}</td>
+                                            <td>
+                                              {departmentNameFor(lecturer.departmentId)}
+                                            </td>
                                             <td>
                                               <button
                                                 type="button"
@@ -556,7 +569,7 @@ export function AdminCourseOfferingsPage() {
                                       <option value="">Select a lecturer</option>
                                       {availableLecturers.map((lecturer) => (
                                         <option key={lecturer.id} value={lecturer.id}>
-                                          {lecturer.name} ({lecturer.staffId}) —{" "}
+                                          {lecturer.name} ({lecturer.staffId}) ·{" "}
                                           {lecturer.departmentName}
                                         </option>
                                       ))}
@@ -616,10 +629,10 @@ export function AdminCourseOfferingsPage() {
         className="app-card app-card--wide admin-compact-form-card"
         aria-labelledby="create-offering-heading"
       >
-        <h2 id="create-offering-heading">Create Course Offering</h2>
+        <h2 id="create-offering-heading">Create course offering</h2>
         <p className="note">
-          An offering publishes one active course for an academic session and
-          semester. A new offering starts open for student registration.
+          An offering schedules one active course for an academic session and
+          semester. It starts open for student registration.
         </p>
 
         {refError !== null ? (
@@ -659,7 +672,7 @@ export function AdminCourseOfferingsPage() {
               <option value="">Select a course</option>
               {activeCourses.map((course) => (
                 <option key={course.id} value={course.id}>
-                  {course.courseCode} — {course.title} (Level {course.levelName})
+                  {course.courseCode} · {course.title} (Level {course.levelName})
                 </option>
               ))}
             </select>

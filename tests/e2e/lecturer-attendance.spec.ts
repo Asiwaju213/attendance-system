@@ -34,7 +34,7 @@ async function openAttendancePage(page: Page): Promise<void> {
   await loginAsLecturer(page);
   await page.goto("/app/lecturer/attendance");
   await expect(
-    page.getByRole("heading", { level: 1, name: "Attendance Sessions" })
+    page.getByRole("heading", { level: 1, name: "Attendance sessions" })
   ).toBeVisible();
 }
 
@@ -93,7 +93,7 @@ test("the attendance page shows the start form with default presets", async ({
   await openAttendancePage(page);
 
   await expect(
-    page.getByRole("heading", { level: 2, name: "Start an Attendance Session" })
+    page.getByRole("heading", { level: 2, name: "Start an attendance session" })
   ).toBeVisible();
   await expect(page.getByLabel("Course offering")).toBeVisible();
   await expect(page.getByLabel("Attendance network")).toBeVisible();
@@ -142,7 +142,7 @@ test("a valid session can be started and appears as the current session", async 
   await page.getByRole("button", { name: "Start session" }).click();
 
   await expect(
-    page.getByText("E2E-101 — E2E Computer Science 101")
+    page.getByText("E2E-101 · E2E Computer Science 101")
   ).toBeVisible();
   await expect(page.getByText("Active", { exact: true })).toBeVisible();
   await expect(page.getByText(/remaining/, { exact: false })).toBeVisible();

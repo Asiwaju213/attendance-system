@@ -52,7 +52,7 @@ interface SessionRow {
   ended_at: Date | null;
 }
 
-const SESSION_SELECT = `
+export const SESSION_SELECT = `
   SELECT s.id, s.course_offering_id, s.started_by_lecturer_id,
          o.sync_id AS course_offering_sync_id,
          c.course_code, c.title AS course_title,
@@ -64,9 +64,9 @@ const SESSION_SELECT = `
            WHEN now() <= s.end_time THEN 'ACTIVE'
            ELSE 'EXPIRED'
          END AS current_state
-  FROM attendance_sessions s
-  JOIN course_offerings o ON o.id = s.course_offering_id
-  JOIN courses c ON c.id = o.course_id
+   FROM attendance_sessions s
+   JOIN course_offerings o ON o.id = s.course_offering_id
+   JOIN courses c ON c.id = o.course_id
 `;
 
 const UNIQUE_VIOLATION_CODE = "23505";
@@ -80,7 +80,7 @@ const UNIQUE_VIOLATION_CODE = "23505";
  * caller of it) to carry a field nothing else reads would be a larger change
  * than the feature needs.
  */
-async function lecturerDisplay(
+export async function lecturerDisplay(
   client: PoolClient,
   lecturerId: number
 ): Promise<{ name: string; staffId: string }> {

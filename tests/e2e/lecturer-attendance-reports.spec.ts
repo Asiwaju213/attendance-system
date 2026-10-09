@@ -205,7 +205,7 @@ async function openReportsPage(page: Page): Promise<void> {
   await loginAsMainLecturer(page);
   await page.goto("/app/lecturer/attendance-reports");
   await expect(
-    page.getByRole("heading", { level: 1, name: "Attendance Reports" })
+    page.getByRole("heading", { level: 1, name: "Attendance reports" })
   ).toBeVisible();
 }
 
@@ -275,7 +275,7 @@ test("a lecturer can navigate to Attendance Reports from Lecturer Home", async (
 
   await expect(page).toHaveURL(/\/app\/lecturer\/attendance-reports$/);
   await expect(
-    page.getByRole("heading", { level: 1, name: "Attendance Reports" })
+    page.getByRole("heading", { level: 1, name: "Attendance reports" })
   ).toBeVisible();
 });
 
@@ -317,7 +317,7 @@ test("the monitor lecturer sees their second assigned open offering as well", as
   await loginAsMonitorLecturer(page);
   await page.goto("/app/lecturer/attendance-reports");
   await expect(
-    page.getByRole("heading", { level: 1, name: "Attendance Reports" })
+    page.getByRole("heading", { level: 1, name: "Attendance reports" })
   ).toBeVisible();
 
   await expect(
@@ -346,7 +346,7 @@ test("a mocked report shows exact counts and percentages with per-student detail
   await selectOfferingByText(page, OPEN_OFFERING_PATTERN);
 
   const report = reportSection(page);
-  await expect(report.getByText("E2E-101 — E2E Computer Science 101")).toBeVisible();
+  await expect(report.getByText("E2E-101 · E2E Computer Science 101")).toBeVisible();
   await expect(report.getByText("E2E-2026/2027 · First Semester")).toBeVisible();
   await expect(report.getByText("Level 100")).toBeVisible();
   await expect(
@@ -446,7 +446,7 @@ test("a null percentage is shown as a dash with a no-completed-sessions notice",
   ).toBeVisible();
   const row = page.locator(".admin-table__row").filter({ hasText: "E2E/STU/0001" });
   await expect(row).toBeVisible();
-  await expect(row.locator("td").nth(6)).toHaveText("—");
+  await expect(row.locator("td").nth(6)).toHaveText("Not available");
 });
 
 test("a report with no enrolled students shows the empty state", async ({
@@ -523,7 +523,7 @@ test("a report API failure shows a friendly error and Retry recovers", async ({
   await page.getByRole("button", { name: "Retry" }).click();
 
   await expect(
-    reportSection(page).getByText("E2E-101 — E2E Computer Science 101")
+    reportSection(page).getByText("E2E-101 · E2E Computer Science 101")
   ).toBeVisible();
 });
 
@@ -771,7 +771,7 @@ test("a real monitor lecturer sees the real E2E-101 report from the backend", as
 
     const report = reportSection(page);
     await expect(
-      report.getByText(`${payload.data.courseOffering.courseCode} — ${payload.data.courseOffering.courseTitle}`)
+      report.getByText(`${payload.data.courseOffering.courseCode} · ${payload.data.courseOffering.courseTitle}`)
     ).toBeVisible();
     await expect(report).toContainText(payload.data.courseOffering.academicSession);
     await expect(report).toContainText(payload.data.courseOffering.semester);
@@ -792,7 +792,7 @@ test("a real monitor lecturer sees the real E2E-101 report from the backend", as
     await expect(cells.nth(5)).toHaveText(String(studentRow!.absentCount));
     await expect(cells.nth(6)).toHaveText(
       studentRow!.attendancePercentage === null
-        ? "—"
+        ? "Not available"
         : `${studentRow!.attendancePercentage.toFixed(2)}%`
     );
 

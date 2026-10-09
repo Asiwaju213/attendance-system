@@ -1,5 +1,5 @@
 /* ============================================================
-   OOU Attendance System — Design Foundation
+   OOU Attendance System: Design Foundation
    Direction: Institutional (OOU green → neutral greys)
    ============================================================ */
 
@@ -1991,27 +1991,19 @@ textarea {
   background: color-mix(in srgb, var(--color-surface-muted) 40%, transparent);
 }
 
+/* An empty-state message is a neutral notice, never an error, so it carries
+   none of the danger styling that `.form-error` applies. */
 .admin-empty__message {
-  margin: 0 0 2px;
-  font-weight: 600;
-  font-size: 14.5px;
+  margin: 0;
   color: var(--color-text);
+  font-size: 14.5px;
+  font-weight: 600;
+  line-height: 1.5;
+  text-align: center;
 }
 
 .admin-empty__message + .inline-status {
   margin-top: 4px;
-}
-
-/* Empty messages intentionally read as neutral notices, not errors. */
-.form-error.admin-empty__message {
-  margin: 0;
-  padding: 0;
-  border: none;
-  background: none;
-  color: var(--color-text);
-  font-size: 14.5px;
-  line-height: 1.5;
-  text-align: center;
 }
 
 .admin-catalog-loading {
@@ -2289,7 +2281,7 @@ textarea {
 
   /* Student sub-pages are navigation-free on mobile by design (see AppShell's "student-focus"
      mode): only the student dashboard offers the global menu or a logout action. The page's own
-     "Log out" button is the only logout left on these screens, so hide it while keeping the
+     "Sign out" button is the only logout left on these screens, so hide it while keeping the
      page-specific "Home" link and all in-page workflow buttons. Desktop keeps the sidebar Sign
      out and the page header as before. */
   .app-shell--student-focus .app-header__nav .secondary-button {
@@ -2355,15 +2347,6 @@ textarea {
 .student-action-section {
   display: grid;
   gap: 14px;
-}
-
-.student-section-heading p {
-  margin: 0 0 4px;
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-  color: var(--color-accent);
 }
 
 .student-section-heading h2 {
@@ -4208,24 +4191,6 @@ textarea {
   margin-top: 0;
 }
 
-.lecturer-section-heading p {
-  margin: 0 0 4px;
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-  color: var(--color-accent);
-}
-
-.lecturer-section-heading h2 {
-  margin: 0;
-  font-family: var(--font-serif);
-  font-size: 23px;
-  font-weight: 600;
-  letter-spacing: -0.015em;
-  line-height: 1.2;
-}
-
 .lecturer-action-grid {
   display: grid;
   gap: var(--space-5);
@@ -4282,36 +4247,6 @@ textarea {
 
 .lecturer-home .lecturer-action-card--primary .lecturer-action-description {
   color: color-mix(in srgb, var(--color-brand-contrast) 78%, transparent);
-}
-
-.lecturer-guidance {
-  padding: 18px 0 0;
-  border-top: 1px solid var(--color-border);
-}
-
-.lecturer-guidance__eyebrow {
-  margin: 0 0 5px;
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-  color: var(--color-accent);
-}
-
-.lecturer-guidance h2 {
-  margin: 0;
-  font-family: var(--font-serif);
-  font-size: 20px;
-  font-weight: 600;
-  line-height: 1.2;
-}
-
-.lecturer-guidance p:last-child {
-  max-width: 62ch;
-  margin: 7px 0 0;
-  font-size: 14px;
-  line-height: 1.55;
-  color: var(--color-text-muted);
 }
 
 @media (min-width: 640px) {

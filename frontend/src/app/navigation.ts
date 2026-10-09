@@ -50,20 +50,20 @@ export interface AppNavigation {
 export function appNavigationForRole(role: Role): AppNavigation {
   switch (role) {
     case "ADMIN":
-      return {
-        roleLabel: "Admin",
-        items: [
-          { label: "Overview", href: "/app/admin" },
-          { label: "Students", href: "/app/admin/students" },
-          { label: "Lecturers", href: "/app/admin/lecturers" },
-          { label: "Courses", href: "/app/admin/courses" },
-          { label: "Offerings", href: "/app/admin/course-offerings" },
-          { label: "Attendance", href: "/app/admin/attendance" },
-          { label: "Reports", href: "/app/admin/attendance-reports" },
-          { label: "Devices", href: "/app/admin/student-devices" },
-          { label: "Academic Setup", href: "/app/admin/academic-periods" },
-        ],
-      };
+return {
+    roleLabel: "Administrator",
+    items: [
+      { label: "Overview", href: "/app/admin" },
+      { label: "Students", href: "/app/admin/students" },
+      { label: "Lecturers", href: "/app/admin/lecturers" },
+      { label: "Courses", href: "/app/admin/courses" },
+      { label: "Course offerings", href: "/app/admin/course-offerings" },
+      { label: "Attendance", href: "/app/admin/attendance" },
+      { label: "Reports", href: "/app/admin/attendance-reports" },
+      { label: "Devices", href: "/app/admin/student-devices" },
+      { label: "Academic setup", href: "/app/admin/academic-periods" },
+    ],
+  };
     case "LECTURER":
       return {
         roleLabel: "Lecturer",
@@ -78,11 +78,12 @@ export function appNavigationForRole(role: Role): AppNavigation {
         roleLabel: "Student",
         items: [
           { label: "Overview", href: "/app/student" },
-          { label: "My Courses", href: "/app/student/courses" },
+          // `/app/student/courses` is an alias of the same page, so it is not
+          // listed separately here.
           { label: "Registration", href: "/app/student/registration" },
           { label: "Attendance", href: "/app/student/attendance" },
           {
-            label: "Attendance Log",
+            label: "Attendance History",
             href: "/app/student/attendance-history",
           },
           { label: "Device", href: "/app/student/device" },

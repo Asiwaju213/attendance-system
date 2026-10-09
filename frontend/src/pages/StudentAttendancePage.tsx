@@ -18,6 +18,7 @@ import type {
   AttendanceRecordStatus,
   EligibleAttendanceSession,
 } from "../types/attendance";
+import { statusLabel } from "../lib/format";
 
 function formatDateTime(value: string): string {
   return new Date(value).toLocaleString(undefined, {
@@ -143,7 +144,7 @@ export function StudentAttendancePage() {
           <p className="attendance-page-header__eyebrow">Student attendance</p>
           <h1>Attendance</h1>
           <p className="app-header__sub">
-            Mark your attendance with your enrolled device.
+            Mark your attendance using the device you registered.
           </p>
         </div>
         <nav className="app-header__nav" aria-label="Student navigation">
@@ -155,7 +156,7 @@ export function StudentAttendancePage() {
             disabled={isLoggingOut}
             aria-busy={isLoggingOut}
           >
-            {isLoggingOut ? "Logging out…" : "Log out"}
+            {isLoggingOut ? "Signing out…" : "Sign out"}
           </button>
         </nav>
       </header>
@@ -166,15 +167,17 @@ export function StudentAttendancePage() {
       >
         <div className="attendance-section__header">
           <p className="attendance-section__eyebrow">Current attendance</p>
-          <h2 id="eligible-heading">Sessions to Mark</h2>
+          <h2 id="eligible-heading">Sessions you can mark</h2>
           <p className="attendance-section__description">
-            Review an eligible session before confirming your attendance.
+            Your registered device confirms that you were present. Review each
+            session before you mark it.
           </p>
         </div>
 
         {confirmation !== null ? (
           <p className="mark-confirmation" role="status">
-            Attendance marked as <strong>{confirmation.status}</strong> for{" "}
+            Attendance marked as{" "}
+            <strong>{statusLabel(confirmation.status)}</strong> for{" "}
             {confirmation.courseCode} · {confirmation.courseTitle}.
           </p>
         ) : null}
@@ -259,7 +262,7 @@ export function StudentAttendancePage() {
 
                   <div className="attendance-session-card__details">
                     <p className="session-list__meta">
-                      {formatDateTime(session.startTime)} –{" "}
+                      {formatDateTime(session.startTime)} to{" "}
                       {formatDateTime(session.endTime)}
                     </p>
                     <p className="session-list__meta">

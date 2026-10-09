@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import type { FormEvent } from "react";
 import { ApiError } from "../api/client";
 import { attendanceErrorMessage } from "../app/attendanceErrors";
+import { statusLabel } from "../lib/format";
 import {
   getAdminAttendanceSession,
   listAdminAttendanceRecords,
@@ -429,7 +430,7 @@ export function AdminAttendancePage() {
 
   const offeringOptions: Option[] = (catalogs?.offerings ?? []).map((offering) => ({
     value: String(offering.id),
-    label: `${offering.courseCode} — ${offering.courseTitle} · ${offering.academicSessionName} · ${offering.semesterName}`,
+    label: `${offering.courseCode} · ${offering.courseTitle} · ${offering.academicSessionName} · ${offering.semesterName}`,
   }));
   const listLoading = sessions === null && listError === null;
 
@@ -438,12 +439,12 @@ export function AdminAttendancePage() {
       <header className="app-header admin-page-header">
         <div>
           <p className="admin-page-header__eyebrow">Administration</p>
-          <h1>Attendance Monitoring</h1>
+          <h1>Attendance monitoring</h1>
           <p className="app-header__sub">
-            Browse and view attendance sessions across all lecturers.
+            Attendance sessions across all lecturers.
           </p>
         </div>
-        <nav className="app-header__nav">
+        <nav className="app-header__nav" aria-label="Admin navigation">
           <Link to="/app/admin">Back to Admin Home</Link>
         </nav>
       </header>
@@ -452,7 +453,9 @@ export function AdminAttendancePage() {
         <h2 id="filter-title">Filters</h2>
         {catalogError !== null ? (
           <div className="resource-error admin-filter-catalog-error">
-            <p className="form-error">{catalogError}</p>
+            <p className="form-error" role="alert">
+              {catalogError}
+            </p>
             <button
               type="button"
               className="secondary-button"
@@ -499,11 +502,23 @@ export function AdminAttendancePage() {
                 type="text"
                 inputMode="numeric"
                 autoComplete="off"
-                placeholder="e.g. 12"
+                placeholder="Internal lecturer ID"
                 value={draft.lecturerId}
                 onChange={(event) => updateDraft("lecturerId", event.target.value)}
-                aria-invalid={filterFormError !== null && /Lecturer ID/i.test(filterFormError)}
+                aria-invalid={
+                  filterFormError !== null && /lecturer id/i.test(filterFormError)
+                }
+                aria-describedby={
+                  filterFormError !== null && /lecturer id/i.test(filterFormError)
+                    ? "filter-lecturer-error"
+                    : undefined
+                }
               />
+              {filterFormError !== null && /lecturer id/i.test(filterFormError) ? (
+                <p className="field__error" id="filter-lecturer-error">
+                  {filterFormError}
+                </p>
+              ) : null}
             </div>
 
             <div className="field">
@@ -557,8 +572,8 @@ export function AdminAttendancePage() {
                 }
               >
                 <option value="">Any status</option>
-                <option value="ACTIVE">ACTIVE</option>
-                <option value="ENDED">ENDED</option>
+                <option value="ACTIVE">Active</option>
+                <option value="ENDED">Ended</option>
               </select>
             </div>
 
@@ -589,9 +604,6 @@ export function AdminAttendancePage() {
             </div>
           </div>
 
-          <p className="admin-filter-note">
-            Filters apply to the session list when you press Apply.
-          </p>
           <div className="confirm-row">
             <button
               type="submit"
@@ -613,8 +625,8 @@ export function AdminAttendancePage() {
         </form>
       </section>
 
-      <section className="app-card app-card--wide" aria-label="Attendance sessions">
-        <h2>Sessions</h2>
+      <section className="app-card app-card--wide" aria-labelledby="attendance-sessions-heading">
+        <h2 id="attendance-sessions-heading">Sessions</h2>
         {listError !== null ? (
           <div className="resource-error">
             <p role="alert" className="form-error">
@@ -634,7 +646,7 @@ export function AdminAttendancePage() {
           </p>
         ) : sessions.length === 0 ? (
           <div className="admin-empty">
-            <p className="form-error admin-empty__message" role="status">
+            <p className="admin-empty__message" role="status">
               No attendance sessions match the current filters.
             </p>
             <p className="inline-status">
@@ -683,7 +695,7 @@ export function AdminAttendancePage() {
                         <span
                           className={`session-status ${stateBadgeClass(session.currentState)}`}
                         >
-                          {session.currentState}
+                          {statusLabel(session.currentState)}
                         </span>
                       </td>
                       <td>
@@ -705,15 +717,18 @@ export function AdminAttendancePage() {
       </section>
 
       {selectedId !== null ? (
-        <section className="app-card app-card--wide" aria-label="Session details">
+        <section
+          className="app-card app-card--wide"
+          aria-labelledby="session-details-heading"
+        >
           <div className="admin-detail__header">
-            <h2>Session details</h2>
+            <h2 id="session-details-heading">Session details</h2>
             <button
               type="button"
               className="secondary-button"
               onClick={closeDetails}
             >
-              Back to sessions
+              Close details
             </button>
           </div>
           {detailLoading ? (
@@ -737,7 +752,7 @@ export function AdminAttendancePage() {
             <div className="session-detail admin-detail">
               <p>
                 <span className="app-detail__label">Course: </span>
-                {detail.courseCode} — {detail.courseTitle}
+                {detail.courseCode} · {detail.courseTitle}
               </p>
               <p>
                 <span className="app-detail__label">Lecturer: </span>
@@ -761,14 +776,14 @@ export function AdminAttendancePage() {
               </p>
               <p>
                 <span className="app-detail__label">Status: </span>
-                {detail.status}
+                {statusLabel(detail.status)}
               </p>
               <p>
                 <span className="app-detail__label">Current state: </span>
                 <span
                   className={`session-status ${stateBadgeClass(detail.currentState)}`}
                 >
-                  {detail.currentState}
+                  {statusLabel(detail.currentState)}
                 </span>
               </p>
               {detail.endedAt !== null ? (
@@ -812,8 +827,8 @@ export function AdminAttendancePage() {
                   </button>
                 </div>
               ) : records === null || records.length === 0 ? (
-                <p className="inline-status">
-                  No attendance records found for this session.
+                <p className="inline-status" role="status">
+                  No attendance records for this session.
                 </p>
               ) : (
                 <div className="admin-table-scroll">
@@ -821,7 +836,7 @@ export function AdminAttendancePage() {
                     <thead>
                       <tr>
                         <th scope="col">Student</th>
-                        <th scope="col">Matric No.</th>
+                        <th scope="col">Matric Number</th>
                         <th scope="col">Status</th>
                         <th scope="col">Marked At</th>
                         <th scope="col">Correction</th>
@@ -844,7 +859,7 @@ export function AdminAttendancePage() {
                                   : "attendance-state attendance-state--late"
                               }
                             >
-                              {record.status}
+                              {statusLabel(record.status)}
                             </span>
                           </td>
                           <td>{formatDateTime(record.markedAt)}</td>
@@ -854,7 +869,7 @@ export function AdminAttendancePage() {
                                 <p className="correction-confirm__text">
                                   Change status for <strong>{confirmation.studentName}</strong> in{" "}
                                   <strong>{confirmation.courseCode}</strong> to{" "}
-                                  <strong>{confirmation.newStatus}</strong>?
+                                  <strong>{statusLabel(confirmation.newStatus)}</strong>?
                                 </p>
                                 {correctionError && (
                                   <p className="form-error correction-confirm__error">
@@ -871,7 +886,7 @@ export function AdminAttendancePage() {
                                   >
                                     {correctingRecordId === record.id
                                       ? "Submitting…"
-                                      : "Confirm"}
+                                      : "Confirm correction"}
                                   </button>
                                   <button
                                     type="button"
@@ -896,7 +911,7 @@ export function AdminAttendancePage() {
                                     confirmation !== null
                                   }
                                 >
-                                  PRESENT
+                                  Present
                                 </button>
                                 <button
                                   type="button"
@@ -909,7 +924,7 @@ export function AdminAttendancePage() {
                                     confirmation !== null
                                   }
                                 >
-                                  LATE
+                                  Late
                                 </button>
                               </div>
                             )}

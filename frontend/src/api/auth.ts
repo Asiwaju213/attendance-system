@@ -62,9 +62,9 @@ export function isUnauthorizedError(error: unknown): boolean {
  * login with no device binding therefore never returns a user, and instead returns one of two
  * non-session outcomes:
  *
- *   - `enrollmentRequired` — the student has no enrolled device and has been issued a scoped,
+ *   - `enrollmentRequired`: the student has no enrolled device and has been issued a scoped,
  *     short-lived enrollment grant. The client must run the enrollment ceremony.
- *   - `deviceAlreadyEnrolled` — an active device exists. No session and no grant were issued, so
+ *   - `deviceAlreadyEnrolled`: an active device exists. No session and no grant were issued, so
  *     this device cannot enrol and an administrator must reset the device first.
  */
 export type StudentLoginResult =
