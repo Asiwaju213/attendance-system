@@ -281,12 +281,23 @@ Consumer (the K12 PC) — see `backend/.env.example`:
 | `SYNC_INTERVAL_MS` | `15000` | Idle poll interval. |
 | `SYNC_BATCH_LIMIT` | `100` | Max events per request (max 500). |
 | `SYNC_REQUEST_TIMEOUT_MS` | `10000` | Per-request timeout. |
+| `SYNC_CLAIM_TIMEOUT_MS` | `60000` | Upload-claim lease in milliseconds (Task 5). An `IN_FLIGHT` upload older than this may be reclaimed by the next drain or released by the admin action. Minimum 1000, maximum 600000. |
+
+A **consumer (the K12 PC) must NOT set** `SYNC_PROVIDER_SECRET_HASH`. A PC that
+does would be seen as a provider too, and the worker's startup guard (see _Worker
+lifecycle_) fails the process rather than starting the wrong role.
 
 Provider (the cloud / Render):
 
 | Variable | Default | Meaning |
 |---|---|---|
 | `SYNC_PROVIDER_SECRET_HASH` | unset | SHA-256 hex digest of the edge secret. Unset = feed refuses everyone. |
+| `SYNC_PUBLISH_ON_STARTUP` | `true` | Publish this cloud's current master data into the feed exactly once at startup (migration 024 marker; an already-seeded feed is never re-seeded). `false` disables it; pre-existing rows must then be published manually with `backfillMasterDataFeed.ts` (see _Feeding an existing database_). |
+
+A **provider (cloud / Render) must NOT set** `SYNC_ENABLED`, `SYNC_CLOUD_BASE_URL`,
+`SYNC_EDGE_ID` or `SYNC_EDGE_SECRET`. It is the provider and must never run the
+consumer worker; the startup guard fails fast if both roles look configured (see
+_Worker lifecycle_).
 
 Generate a pair with:
 
@@ -357,6 +368,9 @@ Later migrations add:
 | `019` `students.sync_id` | both | Student identity for cloud → edge mirroring. |
 | `020` `course_registrations.sync_id` | both | Registration identity for cloud → edge mirroring. |
 | `021` `student_devices.sync_id`/`device_ref`, `sync_student_devices` | both | Device state identity and the edge's device-state projection. |
+| `023` `cloud_session_local_marking` | consumer | Local marking of cloud-created sessions; adds the partial unique index that makes one mark per (student, session). |
+| `024` `sync_feed_publication_state` | provider | Exactly-once "has this feed been seeded" marker. |
+| `025` `sync_outbound_claim` | consumer | `IN_FLIGHT` status + claim lease on the outbound queue; adds `claimed_at`/`claimed_by` and the partial reclaim index. |
 
 `015` is deliberately not a reuse of `sync_processed_events`. That table records
 "this edge applied this feed event at this cursor" and is keyed by consumer; the new
@@ -467,6 +481,96 @@ lecturers → students → student devices → course registrations), because an
 cannot write a course offering, a student or a device state before the rows it
 references exist locally.
 
+## Deploying and rolling back a sync release
+
+Deploying the outbound-claim work (migrations 024 and 025) touches both sides.
+Follow this order and verify as you go. It is the sync counterpart of the
+Render runbook's "database migration, then deployment" rule
+(`docs/render-neon-deployment.md`, step 4 and section 14).
+
+### 1. Migrate both databases first
+
+The new code refuses to run against the old schema:
+
+- migration 025 adds `claimed_at`/`claimed_by` and the `IN_FLIGHT` status to
+  `sync_outbound_attendance_marks`. Without it every claim, health aggregate,
+  stale-claim count and admin release fails (missing column, and the status
+  CHECK still rejects `IN_FLIGHT`).
+- migration 024 adds the provider-only `sync_feed_publication_state` marker.
+
+Apply **all pending migrations to the provider database and to every edge
+database before any new backend boots**:
+
+```bash
+# Provider database (Neon direct endpoint; never in the Render start command):
+DATABASE_URL=<direct Neon connection string> npm run migrate --workspace backend
+
+# Each edge / K12 PC, against its own local database:
+cd backend
+npm run migrate
+```
+
+Then verify **read-only** that both databases reached 025 before deploying code:
+
+```sql
+SELECT filename FROM schema_migrations ORDER BY id;
+```
+
+The last two rows must be `024_sync_feed_publication_state.sql` and
+`025_sync_outbound_claim.sql` on both sides.
+
+### 2. Deploy the provider (cloud / Render)
+
+Redeploy the backend. On startup the provider publishes its current master data
+into the feed exactly once if it has not been seeded (migration 024 marker);
+expect the log line `Published N master-data feed events...` or
+`Sync feed already seeded;...`. Confirm with the admin snapshot:
+
+- `GET /api/admin/sync-status` → `"role": "PROVIDER"` and
+  `"publication": { "seeded": true, ... }`.
+
+### 3. Deploy the edges (K12 PCs)
+
+Roll out each PC: pull the new code, run its local migrations first (step 1),
+then restart the backend. The worker now uses the claim/backoff path.
+
+Confirm on each PC:
+
+- `GET /api/admin/sync-status` → `"role": "EDGE"`, `"staleInFlight": 0`, and
+  sensible outbound counts.
+- Mark one attendance row and watch it leave the queue: `PENDING` → `IN_FLIGHT`
+  → `SENT`. A refused mark parks as `REJECTED` for the admin requeue action.
+
+### 4. Rollback
+
+Rollback is **code only**; the database stays on migration 025.
+
+- Provider: revert the commit and redeploy. Migrations 024/025 are additive and
+  forward-compatible: the older code never references the new columns and never
+  writes `IN_FLIGHT`, so it runs unchanged against the 025 schema.
+- Edge: **before** reverting to the pre-claim code, return any `IN_FLIGHT` rows
+  to `PENDING` — either let the running worker's lease reclaim them (automatic
+  once `claimed_at` is older than the claim timeout) or call
+  `POST /api/admin/sync-outbound/release-stale-claims`. Pre-claim code selects
+  only `status = 'PENDING'`, so a row left `IN_FLIGHT` would be invisible to it
+  until an operator re-released it.
+- Never drop the 025 columns as a "rollback": there is no down-migration, and
+  the old code is compatible with them. If a database rollback is ever truly
+  required it is a Neon branch/snapshot restore, which risks attendance data —
+  ask before discarding anything.
+
+### Tooling that must not be used as routine recovery
+
+`backend/scripts/rebuildCloudSyncFeed.ts` **truncates** the change feed and
+restarts its identity sequence, and `backend/scripts/resetEdgeCheckpoint.sql`
+deletes processed-event receipts and zeros an edge cursor. Both renumber or
+rewind the feed, which silently breaks the cursor and idempotency guarantees
+this design is built on. They exist for reconstruction after a data restore, are
+incompatible with the attendance-data and cursor constraints, and **must not be
+run as part of deployment, recovery or rollback**. Missing feed events are
+repaired by the append-only `backfillMasterDataFeed.ts` script (see _Feeding an
+existing database_).
+
 ## Running it
 
 Local (cloud provider role):
@@ -477,7 +581,13 @@ SYNC_PROVIDER_SECRET_HASH=<digest> npm run migrate
 npm run dev
 ```
 
-Edge (consumer role) — `backend/.env`:
+By default the provider also publishes its current master data into the feed
+exactly once at startup (`SYNC_PUBLISH_ON_STARTUP`, see _Configuration_). The
+`npm run migrate` command above is the required one-off; the startup publish is
+the automated, marker-guarded seed.
+
+Edge (consumer role) — `backend/.env` (`SYNC_CLAIM_TIMEOUT_MS` is optional;
+default 60000 ms, see _Configuration_):
 
 ```
 SYNC_ENABLED=true

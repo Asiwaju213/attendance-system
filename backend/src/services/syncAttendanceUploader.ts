@@ -1,7 +1,12 @@
-import { syncConfig, type SyncConsumerConfig } from "../config/sync";
 import {
-  listPendingUploads,
+  syncConfig,
+  DEFAULT_CLAIM_TIMEOUT_MS,
+  type SyncConsumerConfig,
+} from "../config/sync";
+import {
+  claimPendingUploads,
   recordUploadResult,
+  releaseUploadClaim,
   type OutboundAttendanceMark,
   type UploadOutcome,
 } from "./syncOutboundQueueStore";
@@ -20,6 +25,10 @@ import { postAttendanceMarkBatch } from "./syncFeedClient";
  * queue row. That is what makes an edge with no uplink behave identically to one
  * with a good link, and it is why this can be paused, retried or made slower without
  * any risk to the mark itself.
+ *
+ * The drain claims a lease on its batch first (Task 5): claiming is what keeps a
+ * slow upload from being re-sent by a concurrent drain, and a lease is what makes
+ * a worker that dies mid-request recoverable by the next tick.
  */
 
 export interface UploadSummary {
@@ -76,21 +85,35 @@ export async function uploadPendingAttendanceMarks(
   config?: SyncConsumerConfig
 ): Promise<UploadSummary> {
   const consumerConfig = config ?? syncConfig.consumer;
-  const marks = await listPendingUploads(
-    config?.batchLimit ?? syncConfig.provider.batchLimit
+  const claimTimeoutMs =
+    consumerConfig.claimTimeoutMs ?? DEFAULT_CLAIM_TIMEOUT_MS;
+
+  // A claim is a lease, not a verdict: the batch is IN_FLIGHT for this consumer
+  // for `claimTimeoutMs`, so a concurrent drain skips it instead of re-sending.
+  const marks = await claimPendingUploads(
+    config?.batchLimit ?? syncConfig.provider.batchLimit,
+    consumerConfig.consumerId,
+    claimTimeoutMs
   );
   if (marks.length === 0) {
     return { attempted: 0, accepted: 0, rejected: 0, deferred: 0 };
   }
 
-  // Any throw from here leaves every row in this page PENDING, untouched. That is
-  // the correct handling for an unknown outcome: the cloud may well have recorded
-  // the batch and only the response was lost, so advancing any row now would be a
-  // guess. The cloud's receipt table makes the eventual retry safe.
-  const outcomes = (await postAttendanceMarkBatch(
-    marks.map(toWireMark),
-    consumerConfig
-  )) as WireOutcome[];
+  // Any throw here leaves every row in this page claimed. That is deliberate for
+  // a crash (the lease expires and the next tick reclaims the batch), but for a
+  // CAUGHT request failure this process is alive and healthy, so the batch is
+  // released back to PENDING first: retrying next tick is the same latency as
+  // before the claim existed, and never waits out a lease.
+  let outcomes: WireOutcome[];
+  try {
+    outcomes = (await postAttendanceMarkBatch(
+      marks.map(toWireMark),
+      consumerConfig
+    )) as WireOutcome[];
+  } catch (error) {
+    await releaseUploadClaim(marks.map((mark) => mark.queueId));
+    throw error;
+  }
 
   const byQueueId = new Map<string, WireOutcome>();
   for (const outcome of outcomes) {

@@ -32,7 +32,7 @@ policy and the host-only session cookies keep working.
 | Express build | `npm ci && npm run build --workspace backend` from the repository root |
 | Express start | `npm start --workspace backend` -> `node dist/index.js` |
 | Host / port | `HOST` and `PORT` read from the environment; `0.0.0.0` supported |
-| Startup safety | no migration, seed, reset or schema change on start |
+| Startup safety | no migration, reset or schema change on start; a configured sync provider emits its master-data feed seed exactly once at startup (migration 024 marker) |
 | Health check | `/api/health` returns 200 with the database up, 503 with it down |
 | Build dependencies | `.npmrc` sets `include=dev` so a production `NODE_ENV` cannot strip `tsc` and `@types/*` |
 | Node version | `engines.node` pins Node 22 LTS in the root `package.json` |
@@ -221,6 +221,21 @@ Set these in Render's dashboard. Never in Git, never in a commit message.
 | `WEBAUTHN_ORIGIN` | `https://oou-attendance-system.vercel.app` | the Vercel origin |
 | `WEBAUTHN_RP_NAME` | `OOU Attendance System` | optional; this is the built-in default |
 
+#### Synchronization (this deployment is the provider)
+
+The Render service is the sync **provider**: it serves the change feed to the
+K12 edges and must never run the edge worker.
+
+| Variable | Value | Notes |
+| --- | --- | --- |
+| `SYNC_PROVIDER_SECRET_HASH` | SHA-256 hex digest of the shared K12 edge secret | 64 lowercase hex characters; unset = the feed refuses every edge. Generate the secret/hash pair with the snippet in `docs/cloud-k12-sync.md` (Configuration). Never set the raw secret here. |
+| `SYNC_PUBLISH_ON_STARTUP` | `true` (default) | Optional. Publish the cloud's current master data into the feed exactly once at startup (requires migration 024), marker-guarded against re-seeding. `false` disables it. |
+
+**Do NOT set any of these on Render:** `SYNC_ENABLED`, `SYNC_CLOUD_BASE_URL`,
+`SYNC_EDGE_ID`, `SYNC_EDGE_SECRET`. The cloud is the provider; the startup
+guard fails the whole process if a provider also looks like it has the consumer
+worker enabled.
+
 Notes:
 
 - The application refuses to start if `WEBAUTHN_RP_ID` or `WEBAUTHN_ORIGIN` is
@@ -269,8 +284,10 @@ Database connection established.
 `Database connection established.` comes from the read-only `SELECT 1` in
 `backend/src/index.ts`. It proves the runtime path is safe: it opens a
 connection, checks it, and logs. It does not migrate, seed, reset or modify
-schema. A failure logs a warning and the process keeps running with a degraded
-health endpoint, so a bad database does not cause a crash loop.
+schema (the provider's exactly-once master-data publish is a separate startup
+hook — see section 14 — and never runs as part of this check). A failure logs a
+warning and the process keeps running with a degraded health endpoint, so a bad
+database does not cause a crash loop.
 
 Also confirm the Neon dashboard shows connections arriving, and that they are
 arriving on the **pooled** endpoint.
@@ -382,6 +399,84 @@ Against `https://oou-attendance-system.vercel.app`, through the proxy:
 
 ---
 
+## 14. Deploying a synchronization release (migrations 024/025)
+
+This section covers the release that adds the provider's exactly-once master-data
+publication (migration 024) and the outbound-claim lease (migration 025). Both
+sides run the same migrations. The rule is the same as step 4: **database
+migration before any new code starts**, then provider, then edges — never
+combined.
+
+### 14.1 Migrate both databases before any new backend boots
+
+The new code refuses to run against the pre-025 schema. Every claim
+(`claimPendingUploads`), the health aggregates, the stale-claim count and the
+admin release reference `claimed_at`, `attempts` and the `IN_FLIGHT` status
+added by migration 025; without that migration the column does not exist and the
+status CHECK still rejects `IN_FLIGHT`. Migration 024 is additive (a new
+singleton marker table).
+
+1. **Provider database** — run migrations against the **direct** (non-pooled)
+   Neon connection, from a workstation, exactly as in step 4. Never add this to
+   the Render start command.
+2. **Each edge / K12 PC** — run the same migrations against its own local
+   database (`cd backend && npm run migrate`).
+
+Verify **read-only** on both sides before deploying code:
+
+```sql
+SELECT filename FROM schema_migrations ORDER BY id;
+```
+
+The last two rows must be `024_sync_feed_publication_state.sql` and
+`025_sync_outbound_claim.sql`.
+
+### 14.2 Deploy the provider, then verify
+
+Redeploy the backend to Render. On startup a configured provider publishes its
+current master data into the feed exactly once (migration 024 marker); the logs
+show `Published N master-data feed events...` or `Sync feed already seeded;...`.
+Confirm with the admin snapshot: `GET /api/admin/sync-status` →
+`"role": "PROVIDER"` and `"publication": { "seeded": true, ... }`.
+
+### 14.3 Deploy the edges, then verify
+
+For each PC: pull the new code, apply the PC's local migrations (14.1), restart.
+Confirm `GET /api/admin/sync-status` reports `"role": "EDGE"`,
+`"staleInFlight": 0` and sensible outbound counts; mark one attendance row and
+watch it move `PENDING` → `IN_FLIGHT` → `SENT` (a refused mark parks as
+`REJECTED` for the admin requeue action).
+
+### 14.4 Rollback
+
+A sync rollback is **code only** — the schema stays on migration 025.
+
+- Provider: revert the commit and redeploy. Migrations 024/025 are additive and
+  forward-compatible; the older code never reads the new columns and never
+  writes `IN_FLIGHT`, so it runs unchanged against the 025 schema.
+- Edge: **before** reverting to pre-claim code, return every `IN_FLIGHT` row to
+  `PENDING`. Either let the running code's lease reclaim them (automatic once
+  `claimed_at` is older than the claim timeout) or call
+  `POST /api/admin/sync-outbound/release-stale-claims`. Pre-claim code selects
+  only `status = 'PENDING'`, so a claimed row would be invisible to it.
+
+There is no down-migration for 025, and dropping its columns to "roll back" is
+never correct. If a database rollback is ever genuinely required, restore the
+Neon branch/snapshot from step 4 — attendance data is at stake, so ask first.
+
+### 14.5 Tooling that is not routine recovery
+
+`backend/scripts/rebuildCloudSyncFeed.ts` truncates the change feed and restarts
+its identity sequence; `backend/scripts/resetEdgeCheckpoint.sql` deletes a
+consumer's processed-event receipts and zeros its cursor. Both renumber or rewind
+the feed and silently break the cursor and idempotency guarantees. They exist
+for reconstruction after a data restore, are not part of deployment, recovery or
+rollback, and **must not be run for those purposes**. Missing feed events are
+repaired append-only with `backend/scripts/backfillMasterDataFeed.ts` (see
+`docs/cloud-k12-sync.md`).
+
+---
+
 ## Security rules
 
 - Never commit a production secret: no `DATABASE_URL`, database password, Render
@@ -390,6 +485,14 @@ Against `https://oou-attendance-system.vercel.app`, through the proxy:
   locally in `backend/.env`, which is ignored by Git.
 - Never set `DATABASE_SSL=false` or `AUTH_COOKIE_SECURE=false` in production.
   Both are rejected outright when `NODE_ENV=production`.
+- Never set `SYNC_ENABLED`, `SYNC_CLOUD_BASE_URL`, `SYNC_EDGE_ID` or
+  `SYNC_EDGE_SECRET` on Render (the provider must not run the edge worker), and
+  never set `SYNC_PROVIDER_SECRET_HASH` on an edge PC.
+- Never run `backend/scripts/rebuildCloudSyncFeed.ts` or
+  `backend/scripts/resetEdgeCheckpoint.sql` as deployment or recovery: they
+  truncate the change feed / delete receipts and reset cursors, which silently
+  breaks the cursor and idempotency guarantees. Repair missing feed events only
+  with the append-only `backend/scripts/backfillMasterDataFeed.ts`.
 - Never run `npm run seed:e2e`, `npm run unseed:e2e` or
   `npm run test:db:prepare` against production. Those exist only for the local
   and E2E test database.
@@ -406,6 +509,11 @@ Against `https://oou-attendance-system.vercel.app`, through the proxy:
 - Database: do **not** assume a down migration exists. Restore a Neon branch or
   snapshot taken before step 4, and treat attendance data as important — ask
   before discarding anything.
+- Synchronization (migrations 024/025): a sync rollback is code-only — the
+  database stays on migration 025 (see step 14). Before reverting an edge to
+  the pre-claim code, return any `IN_FLIGHT` queue rows to `PENDING` (the lease
+  reclaims them once the running code drains, or
+  `POST /api/admin/sync-outbound/release-stale-claims` releases them).
 
 ## Excel import and memory
 

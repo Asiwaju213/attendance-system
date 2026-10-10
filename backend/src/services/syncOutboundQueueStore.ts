@@ -58,8 +58,56 @@ function toMark(row: OutboundRow): OutboundAttendanceMark {
   };
 }
 
-const MARK_COLUMNS = `queue_id, attendance_record_id, session_sync_id,
-                      student_id, matric_number, mark_status, mark_time, queued_at`;
+const MARK_COLUMNS = `m.queue_id, m.attendance_record_id, m.session_sync_id,
+                      m.student_id, m.matric_number, m.mark_status, m.mark_time, m.queued_at`;
+
+/**
+ * Per-row retry backoff for marks whose last upload attempt failed (Task 4).
+ *
+ * A `RETRY` verdict returns a row to PENDING with its `attempts` incremented, so
+ * without a gate the very next drain re-sends it. That is correct once, but
+ * during a sustained cloud outage (or a misconfiguration the cloud answers 5xx
+ * to) it turns into a fixed-interval retry storm: the same marks hit the cloud
+ * every poll, forever, with no backoff because the upload path never throws.
+ *
+ * The gate lives in the claim's WHERE clause: a PENDING row that has failed
+ * before is not claimable until `last_attempt_at` is older than the delay for
+ * its attempt count. A fresh row (attempts = 0) is never gated, and ordering is
+ * untouched - the claim still returns rows by `(queued_at, queue_id)`, it simply
+ * does not select rows that are not due yet.
+ *
+ * The schedule mirrors the worker's inbound backoff philosophy but on a longer
+ * horizon: 2s, 5s, 10s, 30s, 60s, 2m, 4m, then 5m for every further attempt.
+ */
+const RETRY_BACKOFF_SCHEDULE_MS = [
+  2_000,
+  5_000,
+  10_000,
+  30_000,
+  60_000,
+  120_000,
+  240_000,
+] as const;
+const RETRY_BACKOFF_CAP_MS = 300_000;
+
+/** The delay the claim enforces before a row with `attempts` is retried. */
+export function retryBackoffDelayMs(attempts: number): number {
+  if (attempts <= 0) {
+    return 0;
+  }
+  if (attempts <= RETRY_BACKOFF_SCHEDULE_MS.length) {
+    return RETRY_BACKOFF_SCHEDULE_MS[attempts - 1];
+  }
+  return RETRY_BACKOFF_CAP_MS;
+}
+
+/**
+ * The backoff schedule as a seconds-per-attempts array, plus its cap, for the
+ * claim's SQL. Kept as parameters (rather than a CASE expression mirroring the
+ * JS helper) so the schedule has exactly one source of truth.
+ */
+const RETRY_BACKOFF_SCHEDULE_SECS = RETRY_BACKOFF_SCHEDULE_MS.map((ms) => ms / 1000);
+const RETRY_BACKOFF_CAP_SECS = RETRY_BACKOFF_CAP_MS / 1000;
 
 /**
  * Queue one local attendance record for upload, using the CALLER's transaction.
@@ -178,29 +226,157 @@ export async function enqueueCloudSessionMark(
 }
 
 /**
- * Read the oldest pending uploads, oldest first.
+ * Claim the oldest pending uploads, oldest first (Task 5).
  *
- * Ordering is by `(queued_at, queue_id)` rather than by a random or insertion-only
- * key: two marks queued in the same millisecond must still come back in a stable
- * order across ticks, or the upload order for a session would not be reproducible.
- * The queue_id tiebreak makes the order total.
+ * A claim is a lease: the rows are moved to IN_FLIGHT with `claimed_by` and
+ * `claimed_at` so no other drain selects them, and the claim expires after
+ * `ttlMs` when a later drain takes it back. Ordering is by `(queued_at,
+ * queue_id)` rather than by a random or insertion-only key: two marks queued in
+ * the same millisecond must still come back in a stable order across ticks, or
+ * the upload order for a session would not be reproducible. The queue_id
+ * tiebreak makes the order total.
  *
- * This is a plain read and takes no locks. Claiming is the uploader's job (Task 5
- * adds the claim), and a single worker per edge is the deployment.
+ * One UPDATE does the whole job, and that statement is what makes the claim
+ * correct, not a transaction around two queries:
+ *
+ *   - `FOR UPDATE SKIP LOCKED` means two drains running at once cannot claim the
+ *     same row - the second skips what the first locked and takes the next batch.
+ *     The cloud's receipts made a duplicate send safe; the claim makes it
+ *     impossible to send.
+ *   - an expired claim is selected in the SAME query, still ordered by its
+ *     original `queued_at`, so a dead worker's batch returns to the queue in its
+ *     original position rather than jumping ahead of marks enqueued since.
+ *
+ * `ttlMs` is clamped so a negative or absurd value cannot make every claim
+ * instantly reclaimable or effectively permanent.
+ *
+ * A PENDING row whose last attempt failed is only selected once its per-row
+ * retry backoff (`retryBackoffDelayMs`) has elapsed, so a sustained outage
+ * spreads retries instead of re-sending the same marks every poll. The backoff
+ * filter never reorders a row within the claim: selection stays by
+ * `(queued_at, queue_id)`.
  */
-export async function listPendingUploads(
-  limit: number
+export async function claimPendingUploads(
+  limit: number,
+  claimerId: string,
+  ttlMs: number
 ): Promise<OutboundAttendanceMark[]> {
   const boundedLimit = Math.min(Math.max(1, Math.trunc(limit)), 500);
+  const claimableTtlSecs = Math.min(Math.max(1, Math.trunc(ttlMs)), 3_600_000) / 1000;
+  // One statement does the whole job. `claimed` locks the rows IN the order the
+  // uploader must send them (FOR UPDATE SKIP LOCKED), `updated` flips them to
+  // IN_FLIGHT, and the final SELECT returns them in the SAME order - RETURNING
+  // comes back in whichever order the UPDATE happened to touch the rows, which is
+  // not reproducible, so the rows are joined back to `claimed` and ordered.
   const result = await pool.query(
-    `SELECT ${MARK_COLUMNS}
-     FROM sync_outbound_attendance_marks
-     WHERE status = 'PENDING'
-     ORDER BY queued_at ASC, queue_id ASC
-     LIMIT $1`,
-    [boundedLimit]
+    `WITH claimed AS (
+       SELECT queue_id
+       FROM sync_outbound_attendance_marks
+       WHERE (status = 'PENDING'
+                AND (attempts = 0
+                     OR last_attempt_at IS NULL
+                     OR last_attempt_at <= now() - make_interval(secs =>
+                           LEAST(COALESCE(($4::int[])[attempts], $5::int), $5::int))))
+          OR (status = 'IN_FLIGHT' AND claimed_at <= now() - make_interval(secs => $2))
+       ORDER BY queued_at ASC, queue_id ASC
+       LIMIT $1
+       FOR UPDATE SKIP LOCKED
+     ),
+     updated AS (
+       UPDATE sync_outbound_attendance_marks m
+       SET status = 'IN_FLIGHT',
+           claimed_at = now(),
+           claimed_by = $3,
+           updated_at = now()
+       FROM claimed
+       WHERE m.queue_id = claimed.queue_id
+       RETURNING m.queue_id
+     )
+     SELECT ${MARK_COLUMNS}
+     FROM sync_outbound_attendance_marks m
+     JOIN claimed ON claimed.queue_id = m.queue_id
+     ORDER BY m.queued_at ASC, m.queue_id ASC`,
+    [
+      boundedLimit,
+      claimableTtlSecs,
+      claimerId,
+      RETRY_BACKOFF_SCHEDULE_SECS,
+      RETRY_BACKOFF_CAP_SECS,
+    ]
   );
   return result.rows.map((row) => toMark(row as OutboundRow));
+}
+
+/**
+ * Give a claimed batch back before its result is known.
+ *
+ * The uploader calls this when the request ITSELF fails (unknown outcome): the
+ * cloud may or may not have received the batch, so the rows are not sent, but
+ * they must also not sit claimed while a healthy process can just retry next
+ * tick. Only a few lines upstream this function stays OUT of the dead-worker
+ * path - a crash leaves the rows IN_FLIGHT for the lease to reclaim, which is
+ * exactly the case the lease exists for.
+ */
+export async function releaseUploadClaim(queueIds: string[]): Promise<void> {
+  if (queueIds.length === 0) {
+    return;
+  }
+  await pool.query(
+    `UPDATE sync_outbound_attendance_marks
+     SET status = 'PENDING',
+         claimed_at = NULL,
+         claimed_by = NULL
+     WHERE queue_id = ANY($1::uuid[]) AND status = 'IN_FLIGHT'`,
+    [queueIds]
+  );
+}
+
+/**
+ * The number of IN_FLIGHT rows whose lease is already longer than `minAgeMs`.
+ *
+ * This is the "is the queue stuck because a worker died?" signal. `inFlight`
+ * on its own is ambiguous - it also counts a batch a healthy uploader is sending
+ * right now - while a claim older than the configured lease can only mean the
+ * process that took it is gone or wedged. The count is what the health surface
+ * reports; `releaseStaleUploadClaims` is the recovery that follows it.
+ */
+export async function countStaleUploadClaims(minAgeMs: number): Promise<number> {
+  const boundedSecs = Math.min(Math.max(1, Math.trunc(minAgeMs)), 3_600_000) / 1000;
+  const result = await pool.query(
+    `SELECT count(*)::int AS n
+     FROM sync_outbound_attendance_marks
+     WHERE status = 'IN_FLIGHT'
+       AND claimed_at <= now() - make_interval(secs => $1)`,
+    [boundedSecs]
+  );
+  return Number(result.rows[0].n ?? 0);
+}
+
+/**
+ * Release IN_FLIGHT claims whose lease is longer than `minAgeMs`, back to PENDING.
+ *
+ * The operator-side counterpart to the claim's lease: the lease is what lets a
+ * HEALTHY process reclaim a dead worker's batch, and this is what an operator can
+ * do when no worker is running at all (a PC kept offline, a process that will not
+ * be restarted soon). The age threshold is enforced, not advisory, so a claim a
+ * live uploader just took is never preempted: only claims older than the
+ * threshold are touched. A subsequent re-send of an already-delivered batch stays
+ * harmless, because the cloud keys its receipts on `queue_id`.
+ *
+ * @returns how many claims were released.
+ */
+export async function releaseStaleUploadClaims(minAgeMs: number): Promise<number> {
+  const boundedSecs = Math.min(Math.max(1, Math.trunc(minAgeMs)), 3_600_000) / 1000;
+  const result = await pool.query(
+    `UPDATE sync_outbound_attendance_marks
+     SET status = 'PENDING',
+         claimed_at = NULL,
+         claimed_by = NULL
+     WHERE status = 'IN_FLIGHT'
+       AND claimed_at <= now() - make_interval(secs => $1)`,
+    [boundedSecs]
+  );
+  return result.rowCount ?? 0;
 }
 
 /** Why an upload left the PENDING state. */
@@ -212,10 +388,13 @@ export type UploadOutcome =
 /**
  * Record the result of one upload attempt.
  *
- * A transport failure is `RETRY`: the row stays PENDING, the attempt counter goes
- * up and the reason is kept, so Task 5 can back off and Task 6 can show why the
- * queue is not draining. Only an outcome the cloud will never accept moves the row
- * to REJECTED, and only `SENT` clears the error.
+ * A transport failure is `RETRY`: the row leaves its claim and returns to PENDING,
+ * the attempt counter goes up and the reason is kept, so the next drain can back
+ * off and Task 6 can show why the queue is not draining. Only an outcome the cloud
+ * will never accept moves the row to REJECTED, and only `SENT` clears the error.
+ *
+ * Every outcome also clears `claimed_at`/`claimed_by`: the claim is work in
+ * progress, and a row that now has a verdict is not in progress any more.
  *
  * `last_error` is cleared on success so a queue that recovered does not keep
  * displaying a stale reason.
@@ -232,7 +411,9 @@ export async function recordUploadResult(
            last_attempt_at = now(),
            last_error = NULL,
            sent_at = now(),
-           cloud_record_id = $2
+           cloud_record_id = $2,
+           claimed_at = NULL,
+           claimed_by = NULL
        WHERE queue_id = $1`,
       [queueId, result.cloudRecordId]
     );
@@ -245,7 +426,9 @@ export async function recordUploadResult(
        SET status = 'REJECTED',
            attempts = attempts + 1,
            last_attempt_at = now(),
-           last_error = $2
+           last_error = $2,
+           claimed_at = NULL,
+           claimed_by = NULL
        WHERE queue_id = $1`,
       [queueId, result.reason]
     );
@@ -254,7 +437,12 @@ export async function recordUploadResult(
 
   await pool.query(
     `UPDATE sync_outbound_attendance_marks
-     SET attempts = attempts + 1, last_attempt_at = now(), last_error = $2
+     SET status = 'PENDING',
+         attempts = attempts + 1,
+         last_attempt_at = now(),
+         last_error = $2,
+         claimed_at = NULL,
+         claimed_by = NULL
      WHERE queue_id = $1`,
     [queueId, result.reason]
   );
@@ -281,8 +469,16 @@ export async function requeueRejectedMark(queueId: string): Promise<boolean> {
 /** Queue depth by status, plus the age of the oldest pending mark. */
 export interface OutboundQueueSummary {
   pending: number;
+  inFlight: number;
   sent: number;
   rejected: number;
+  /**
+   * PENDING rows that have already failed at least once (attempts > 0). These
+   * are the marks the cloud has refused-or-missed and the edge is backing off;
+   * a non-zero count alongside `lastError` is the "failed uploads" diagnostic,
+   * distinct from rows that have never been sent.
+   */
+  retrying: number;
   oldestPendingAt: string | null;
   lastSentAt: string | null;
   lastError: string | null;
@@ -298,8 +494,10 @@ export async function readOutboundQueueSummary(): Promise<OutboundQueueSummary> 
   const result = await pool.query(
     `SELECT
        count(*) FILTER (WHERE status = 'PENDING')                        AS pending,
+       count(*) FILTER (WHERE status = 'IN_FLIGHT')                      AS in_flight,
        count(*) FILTER (WHERE status = 'SENT')                           AS sent,
        count(*) FILTER (WHERE status = 'REJECTED')                       AS rejected,
+       count(*) FILTER (WHERE status = 'PENDING' AND attempts > 0)       AS retrying,
        min(queued_at) FILTER (WHERE status = 'PENDING')                  AS oldest_pending,
        max(sent_at)                                                       AS last_sent,
        max(last_error) FILTER (
@@ -311,8 +509,10 @@ export async function readOutboundQueueSummary(): Promise<OutboundQueueSummary> 
   const row = result.rows[0];
   return {
     pending: Number(row.pending ?? 0),
+    inFlight: Number(row.in_flight ?? 0),
     sent: Number(row.sent ?? 0),
     rejected: Number(row.rejected ?? 0),
+    retrying: Number(row.retrying ?? 0),
     oldestPendingAt: row.oldest_pending
       ? new Date(row.oldest_pending as Date).toISOString()
       : null,

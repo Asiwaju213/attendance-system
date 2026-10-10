@@ -9,6 +9,7 @@ import {
   serverConfig,
 } from "./config/server";
 import { pool } from "./db/pool";
+import { maybePublishMasterDataOnStartup } from "./services/syncMasterDataBackfill";
 import { startSyncWorker, stopSyncWorker } from "./services/syncWorker";
 
 const { host, port } = serverConfig;
@@ -36,6 +37,16 @@ const server: Server = app.listen(port, host, () => {
  * does not set SYNC_ENABLED.
  */
 startSyncWorker();
+
+/**
+ * Publish the provider's current master data into the feed once, if this
+ * deployment is a cloud/provider.
+ *
+ * Also never awaited and never able to fail startup: it is a maintenance step
+ * (marker-guarded, exactly-once, idempotent) whose failure is logged and retried
+ * on the next startup, exactly as the edge worker's own first tick behaves.
+ */
+void maybePublishMasterDataOnStartup();
 
 async function checkDatabaseConnection() {
   try {

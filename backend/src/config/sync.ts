@@ -32,6 +32,19 @@ const DEFAULT_REQUEST_TIMEOUT_MS = 10_000;
 const MIN_REQUEST_TIMEOUT_MS = 500;
 const MAX_REQUEST_TIMEOUT_MS = 120_000;
 
+/**
+ * How long an outbound upload claim stays IN_FLIGHT before another drain may
+ * reclaim the row (Task 5).
+ *
+ * The default is well past the request timeout (a healthy upload finishes in one
+ * HTTP request) but shorter than a poll interval is dangerous - a reclaim must
+ * never steal a send that is still legitimately in flight - so the lowest legal
+ * value is one second.
+ */
+export const DEFAULT_CLAIM_TIMEOUT_MS = 60_000;
+const MIN_CLAIM_TIMEOUT_MS = 1_000;
+const MAX_CLAIM_TIMEOUT_MS = 600_000;
+
 /** Schema version of the feed payload, so an edge can reject what it cannot read. */
 export const SYNC_PAYLOAD_VERSION = 1;
 
@@ -151,6 +164,13 @@ export interface SyncProviderConfig {
   /** SHA-256 hex of the accepted edge secret, or null when the feed is disabled. */
   secretHash: string | null;
   batchLimit: number;
+  /**
+   * Whether the provider publishes its current master data once at startup.
+   *
+   * On by default so a pre-existing (migration-013/019/020/021-era) row can never
+   * silently miss the feed again; set SYNC_PUBLISH_ON_STARTUP=false to disable.
+   */
+  publishOnStartup: boolean;
 }
 
 export interface SyncConsumerConfig {
@@ -163,6 +183,12 @@ export interface SyncConsumerConfig {
   intervalMs: number;
   batchLimit: number;
   requestTimeoutMs: number;
+  /**
+   * Claim lease length in milliseconds (Task 5). A claimed-but-stalled upload is
+   * reclaimed by the next drain once this elapses. Defaults to
+   * `DEFAULT_CLAIM_TIMEOUT_MS` when unset.
+   */
+  claimTimeoutMs?: number;
 }
 
 export interface SyncConfig {
@@ -228,6 +254,9 @@ export function resolveSyncConfig(env: NodeJS.ProcessEnv = process.env): SyncCon
     provider: {
       secretHash,
       batchLimit,
+      // Idempotent and marker-guarded by the seeder itself, so "on by default"
+      // can never re-seed an already-seeded feed. See syncMasterDataBackfill.ts.
+      publishOnStartup: optionalBoolean(env, "SYNC_PUBLISH_ON_STARTUP", true),
     },
     consumer: {
       enabled: consumerEnabled,
@@ -251,6 +280,13 @@ export function resolveSyncConfig(env: NodeJS.ProcessEnv = process.env): SyncCon
         DEFAULT_REQUEST_TIMEOUT_MS,
         MIN_REQUEST_TIMEOUT_MS,
         MAX_REQUEST_TIMEOUT_MS
+      ),
+      claimTimeoutMs: optionalInteger(
+        env,
+        "SYNC_CLAIM_TIMEOUT_MS",
+        DEFAULT_CLAIM_TIMEOUT_MS,
+        MIN_CLAIM_TIMEOUT_MS,
+        MAX_CLAIM_TIMEOUT_MS
       ),
     },
   };

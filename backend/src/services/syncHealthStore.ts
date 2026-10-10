@@ -1,7 +1,17 @@
 import { pool } from "../db/pool";
-import { syncConfig } from "../config/sync";
-import { readOutboundQueueSummary } from "./syncOutboundQueueStore";
+import {
+  syncConfig,
+  DEFAULT_CLAIM_TIMEOUT_MS,
+} from "../config/sync";
+import {
+  countStaleUploadClaims,
+  readOutboundQueueSummary,
+} from "./syncOutboundQueueStore";
 import { getSyncStatus } from "./syncStatusStore";
+import {
+  readPublicationState,
+  type FeedPublicationState,
+} from "./syncMasterDataBackfill";
 
 /**
  * The operator-visible synchronization health snapshot (Task 6).
@@ -38,8 +48,24 @@ export interface SyncInboundHealth {
 
 export interface SyncOutboundHealth {
   pending: number;
+  /** Claims currently being uploaded, visible so a stuck lease is diagnosable. */
+  inFlight: number;
+  /**
+   * IN_FLIGHT claims whose lease has already expired. A claim older than the
+   * configured timeout can only mean the process that took it died or wedged;
+   * `staleInFlight > 0` alongside `inFlight` is the "dead worker, queue will not
+   * drain by itself" signal, and the recovery is the admin release action.
+   */
+  staleInFlight: number;
   sent: number;
   rejected: number;
+  /**
+   * PENDING rows that have already failed at least once and are sitting out
+   * their per-row backoff. Together with `lastError` this is the "failed
+   * uploads" diagnostic: the queue is draining slowly on purpose (backoff), not
+   * because it is stuck.
+   */
+  retrying: number;
   oldestPendingAt: string | null;
   lastSentAt: string | null;
   lastError: string | null;
@@ -59,6 +85,13 @@ export interface SyncHealthSnapshot {
   role: SyncRole;
   inbound: SyncInboundHealth;
   outbound: SyncOutboundHealth;
+  /**
+   * Provider-only: whether the cloud has published its current master data into
+   * the feed. NULL on the edge and on a standalone deployment, where there is no
+   * feed to seed. Lets an operator see the exact-once seed ran instead of hoping
+   * a skipped backfill did not silently strand pre-existing rows.
+   */
+  publication: FeedPublicationState | null;
   /**
    * A single overall verdict, so a monitoring check does not have to reimplement the
    * rules that decide whether this deployment is healthy.
@@ -99,8 +132,11 @@ export async function getSyncHealth(): Promise<SyncHealthSnapshot> {
 
   let outbound: SyncOutboundHealth = {
     pending: 0,
+    inFlight: 0,
+    staleInFlight: 0,
     sent: 0,
     rejected: 0,
+    retrying: 0,
     oldestPendingAt: null,
     lastSentAt: null,
     lastError: null,
@@ -109,8 +145,13 @@ export async function getSyncHealth(): Promise<SyncHealthSnapshot> {
 
   try {
     const summary = await readOutboundQueueSummary();
+    // A claim older than the configured lease is a dead worker, not an upload
+    // in progress. The same threshold the claim itself reclaims by is used here,
+    // so the "stale" label means exactly "the next drain would have reclaimed it".
+    const claimTtlMs = syncConfig.consumer.claimTimeoutMs ?? DEFAULT_CLAIM_TIMEOUT_MS;
     outbound = {
       ...summary,
+      staleInFlight: await countStaleUploadClaims(claimTtlMs),
       // Two missed poll intervals: long enough that a slow tick or a brief outage is
       // not reported, short enough that a genuinely stuck queue is noticed quickly.
       backlogged:
@@ -137,7 +178,25 @@ export async function getSyncHealth(): Promise<SyncHealthSnapshot> {
     consecutiveFailures: workerStatus.consecutiveFailures,
   };
 
-  return { role, inbound, outbound, state: resolveState(role, inbound, outbound) };
+  // A feed-read failure on a provider must not fail a health poll: the rest of
+  // the snapshot is still useful, and a stuck publication is visible as
+  // `publication.seeded === false` on the next successful read.
+  let publication: FeedPublicationState | null = null;
+  if (role === "PROVIDER") {
+    try {
+      publication = await readPublicationState();
+    } catch (error) {
+      console.error("Feed publication health read failed.", (error as Error).message);
+    }
+  }
+
+  return {
+    role,
+    inbound,
+    outbound,
+    publication,
+    state: resolveState(role, inbound, outbound),
+  };
 }
 
 /**
